@@ -2,12 +2,12 @@ package com.sashkomusic.libraryagent.domain.entity;
 
 import com.sashkomusic.libraryagent.domain.model.ReleaseFormat;
 import com.sashkomusic.libraryagent.domain.model.ReleaseType;
-import com.sashkomusic.libraryagent.domain.model.Source;
+import com.sashkomusic.libraryagent.domain.model.SearchEngine;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
-import org.hibernate.annotations.Type;
 
+import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -29,7 +29,7 @@ public class Release {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private Source source;
+    private SearchEngine source;
 
     @Column(nullable = false)
     private String title;
@@ -54,6 +54,12 @@ public class Release {
     @Column(nullable = false)
     private String directoryPath;
 
+    @Column
+    private Integer metadataVersion;
+
+    @Column
+    private LocalDateTime lastProcessed;
+
     @ManyToMany(cascade = {CascadeType.PERSIST, CascadeType.MERGE})
     @JoinTable(
             name = "release_artists",
@@ -69,6 +75,10 @@ public class Release {
             inverseJoinColumns = @JoinColumn(name = "tag_id")
     )
     private Set<Tag> tags = new HashSet<>();
+
+    @ManyToOne(cascade = {CascadeType.PERSIST, CascadeType.MERGE})
+    @JoinColumn(name = "label_id")
+    private Label label;
 
     @OneToMany(mappedBy = "release", cascade = CascadeType.ALL, orphanRemoval = true)
     private Set<Track> tracks = new HashSet<>();

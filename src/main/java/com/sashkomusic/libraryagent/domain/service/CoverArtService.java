@@ -89,9 +89,18 @@ public class CoverArtService {
 
     public byte[] getCoverArt(ReleaseMetadata metadata, String directoryPath) {
         Path albumDir = Paths.get(directoryPath);
-        downloadCover(metadata.coverUrl(), albumDir);
-
         Path coverPath = albumDir.resolve("cover.jpg");
+
+        if (Files.exists(coverPath)) {
+            log.debug("Cover art already exists at: {}, skipping download", coverPath);
+            try {
+                return Files.readAllBytes(coverPath);
+            } catch (IOException ex) {
+                log.error("Error reading existing cover art from {}: {}", coverPath, ex.getMessage());
+            }
+        }
+
+        downloadCover(metadata.coverUrl(), albumDir);
 
         if (!Files.exists(coverPath)) {
             log.warn("Cover art not found at: {}", coverPath);

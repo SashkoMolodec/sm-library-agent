@@ -8,6 +8,7 @@ import com.sashkomusic.libraryagent.domain.model.ValidationResult;
 import com.sashkomusic.libraryagent.messaging.consumer.dto.ProcessLibraryTaskDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Files;
@@ -22,6 +23,9 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class LibraryProcessingService {
 
+    @Value("${processing.version:1}")
+    private int processingVersion;
+
     private final FileValidator fileValidator;
     private final CoverArtService coverArtService;
     private final TrackMatcher trackMatcher;
@@ -30,6 +34,7 @@ public class LibraryProcessingService {
     private final ReleaseService releaseService;
     private final FileOrganizer fileOrganizer;
     private final LibraryConfig libraryConfig;
+    private final ReleaseMetadataWriter metadataWriter;
 
     public ProcessingResult processLibrary(ProcessLibraryTaskDto task) {
         log.info("Starting library processing for chatId={}, directory={}",
@@ -70,7 +75,7 @@ public class LibraryProcessingService {
         }
 
         Map<String, TrackMatch> matchMap = trackMatcher.batchMatch(audioFiles, metadata);
-        log.info("Batch matched {} files using AI", matchMap.size());
+        log.info("Batch matched {} files", matchMap.size());
 
         int fileIndex = 0;
         for (Path file : audioFiles) {
@@ -134,6 +139,7 @@ public class LibraryProcessingService {
                                 pf.originalPath(),
                                 pf.newPath(),
                                 pf.trackTitle(),
+                                pf.trackArtist(),
                                 pf.trackNumber()
                         ))
                         .toList();
@@ -144,14 +150,16 @@ public class LibraryProcessingService {
                             pf.originalPath(),
                             pf.newPath(),
                             pf.trackTitle(),
+                            pf.trackArtist(),
                             pf.trackNumber()
                     ))
                     .toList();
         }
 
         try {
-            releaseService.saveRelease(metadata, directoryPath, coverPath, organizedFiles);
+            releaseService.saveRelease(metadata, directoryPath, coverPath, organizedFiles, processingVersion);
             log.info("Release saved to database successfully");
+            metadataWriter.writeMetadata(directoryPath, metadata, processingVersion);
 
         } catch (Exception ex) {
             log.error("Failed to save release to database: {}", ex.getMessage(), ex);
@@ -175,6 +183,7 @@ public class LibraryProcessingService {
                 originalPath,
                 renamedFile.toString(),
                 match.trackTitle(),
+                match.artist(),
                 match.trackNumber()
         );
     }

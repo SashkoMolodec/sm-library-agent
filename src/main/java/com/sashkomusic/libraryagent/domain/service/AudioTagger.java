@@ -1,7 +1,7 @@
 package com.sashkomusic.libraryagent.domain.service;
 
 import com.sashkomusic.libraryagent.domain.model.ReleaseMetadata;
-import com.sashkomusic.libraryagent.domain.model.Source;
+import com.sashkomusic.libraryagent.domain.model.SearchEngine;
 import com.sashkomusic.libraryagent.domain.model.TrackMatch;
 import lombok.extern.slf4j.Slf4j;
 import org.jaudiotagger.audio.AudioFile;
@@ -55,6 +55,10 @@ public class AudioTagger {
                 tag.setField(FieldKey.GROUPING, allTypes);
             }
 
+            if (metadata.label() != null && !metadata.label().isEmpty()) {
+                tag.setField(FieldKey.RECORD_LABEL, metadata.label());
+            }
+
             if (metadata.tags() != null && !metadata.tags().isEmpty()) {
                 String tagsComment = String.join(", ", metadata.tags());
                 tag.setField(FieldKey.COMMENT, tagsComment);
@@ -65,7 +69,7 @@ public class AudioTagger {
                     addCustomTextField(id3Tag, "RELEASEID", metadata.id());
                 }
 
-                Source source = metadata.source();
+                SearchEngine source = metadata.source();
                 if (source != null) {
                     addCustomTextField(id3Tag, "SOURCE", source.name());
                 }
@@ -117,4 +121,49 @@ public class AudioTagger {
             log.warn("Failed to add custom field {}: {}", description, e.getMessage());
         }
     }
+
+    public TrackInfo readTrackInfo(Path audioFile) {
+        try {
+            AudioFile f = AudioFileIO.read(audioFile.toFile());
+            Tag tag = f.getTag();
+
+            if (tag == null) {
+                log.warn("No tags found in: {}", audioFile.getFileName());
+                return null;
+            }
+
+            String trackNumber = tag.getFirst(FieldKey.TRACK);
+            String title = tag.getFirst(FieldKey.TITLE);
+            String artist = tag.getFirst(FieldKey.ARTIST);
+
+            Integer trackNum = parseTrackNumber(trackNumber);
+
+            if (trackNum == null || title == null || title.isEmpty()) {
+                log.warn("Incomplete track info in {}: track={}, title={}",
+                    audioFile.getFileName(), trackNumber, title);
+                return null;
+            }
+
+            return new TrackInfo(trackNum, title, artist != null ? artist : "");
+
+        } catch (Exception ex) {
+            log.error("Failed to read track info from {}: {}", audioFile.getFileName(), ex.getMessage());
+            return null;
+        }
+    }
+
+    private Integer parseTrackNumber(String trackNumberStr) {
+        if (trackNumberStr == null || trackNumberStr.isEmpty()) {
+            return null;
+        }
+
+        String[] parts = trackNumberStr.split("[/\\\\]");
+        try {
+            return Integer.parseInt(parts[0].trim());
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    public record TrackInfo(int trackNumber, String title, String artist) {}
 }

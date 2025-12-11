@@ -57,6 +57,7 @@ public class FileOrganizer {
                         file.newPath(),
                         targetPath.toString(),
                         file.trackTitle(),
+                        file.trackArtist(),
                         file.trackNumber()
                 ));
             }
@@ -158,6 +159,7 @@ public class FileOrganizer {
             String oldPath,
             String newPath,
             String trackTitle,
+            String trackArtist,
             int trackNumber
     ) {}
 

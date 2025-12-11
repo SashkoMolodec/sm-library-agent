@@ -1,6 +1,7 @@
 package com.sashkomusic.libraryagent.domain.service;
 
 import com.sashkomusic.libraryagent.domain.entity.Artist;
+import com.sashkomusic.libraryagent.domain.entity.Label;
 import com.sashkomusic.libraryagent.domain.entity.Release;
 import com.sashkomusic.libraryagent.domain.entity.Tag;
 import com.sashkomusic.libraryagent.domain.entity.Track;
@@ -8,6 +9,7 @@ import com.sashkomusic.libraryagent.domain.model.ReleaseFormat;
 import com.sashkomusic.libraryagent.domain.model.ReleaseMetadata;
 import com.sashkomusic.libraryagent.domain.model.ReleaseType;
 import com.sashkomusic.libraryagent.domain.repository.ArtistRepository;
+import com.sashkomusic.libraryagent.domain.repository.LabelRepository;
 import com.sashkomusic.libraryagent.domain.repository.ReleaseRepository;
 import com.sashkomusic.libraryagent.domain.repository.TagRepository;
 import lombok.RequiredArgsConstructor;
@@ -27,13 +29,15 @@ public class ReleaseService {
     private final ReleaseRepository releaseRepository;
     private final ArtistRepository artistRepository;
     private final TagRepository tagRepository;
+    private final LabelRepository labelRepository;
 
     @Transactional
     public Release saveRelease(
             ReleaseMetadata metadata,
             String directoryPath,
             String coverPath,
-            List<FileOrganizer.OrganizedFile> organizedFiles
+            List<FileOrganizer.OrganizedFile> organizedFiles,
+            Integer metadataVersion
     ) {
         log.info("Saving release: {} by {} from source {}", metadata.title(), metadata.artist(), metadata.source());
 
@@ -51,6 +55,10 @@ public class ReleaseService {
         release.setDirectoryPath(directoryPath);
         release.setCoverPath(coverPath);
         release.setReleaseFormat(ReleaseFormat.DIGITAL); // Default
+        release.setLastProcessed(java.time.LocalDateTime.now());
+        if (metadataVersion != null) {
+            release.setMetadataVersion(metadataVersion);
+        }
 
         if (metadata.types() != null && !metadata.types().isEmpty()) {
             ReleaseType releaseType = mapToReleaseType(metadata.types().get(0));
@@ -72,6 +80,11 @@ public class ReleaseService {
         Artist artist = findOrCreateArtist(metadata.artist());
         release.addArtist(artist);
 
+        if (metadata.label() != null && !metadata.label().isEmpty()) {
+            Label label = findOrCreateLabel(metadata.label());
+            release.setLabel(label);
+        }
+
         if (metadata.tags() != null) {
             for (String tagName : metadata.tags()) {
                 Tag tag = findOrCreateTag(tagName);
@@ -88,7 +101,8 @@ public class ReleaseService {
                 Track track = new Track(file.trackTitle(), file.trackNumber());
                 track.setLocalPath(file.newPath());
 
-                track.addArtist(artist);
+                Artist trackArtist = resolveTrackArtist(metadata, file);
+                track.addArtist(trackArtist);
 
                 release.addTrack(track);
             }
@@ -98,6 +112,13 @@ public class ReleaseService {
         log.info("Successfully saved release with ID: {}", savedRelease.getId());
 
         return savedRelease;
+    }
+
+    private Artist resolveTrackArtist(ReleaseMetadata metadata, FileOrganizer.OrganizedFile file) {
+        String trackArtistName = file.trackArtist() != null && !file.trackArtist().isEmpty()
+                ? file.trackArtist()
+                : metadata.artist();
+        return findOrCreateArtist(trackArtistName);
     }
 
     private Artist findOrCreateArtist(String name) {
@@ -113,6 +134,14 @@ public class ReleaseService {
                 .orElseGet(() -> {
                     Tag newTag = new Tag(name);
                     return tagRepository.save(newTag);
+                });
+    }
+
+    private Label findOrCreateLabel(String name) {
+        return labelRepository.findByName(name)
+                .orElseGet(() -> {
+                    Label newLabel = new Label(name);
+                    return labelRepository.save(newLabel);
                 });
     }
 

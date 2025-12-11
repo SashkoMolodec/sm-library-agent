@@ -5,6 +5,10 @@ import com.sashkomusic.libraryagent.domain.model.ReleaseMetadata;
 import com.sashkomusic.libraryagent.domain.model.TrackMatch;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jaudiotagger.audio.AudioFile;
+import org.jaudiotagger.audio.AudioFileIO;
+import org.jaudiotagger.tag.FieldKey;
+import org.jaudiotagger.tag.Tag;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -21,6 +25,12 @@ public class TrackMatcher {
 
     public Map<String, TrackMatch> batchMatch(List<Path> audioFiles, ReleaseMetadata metadata) {
         Map<String, TrackMatch> matchMap = new HashMap<>();
+
+        Map<String, TrackMatch> tagBasedMatches = tryMatchFromExistingTags(audioFiles, metadata);
+        if (!tagBasedMatches.isEmpty() && tagBasedMatches.size() == audioFiles.size()) {
+            log.info("Successfully matched all {} files using existing track numbers from tags", audioFiles.size());
+            return tagBasedMatches;
+        }
 
         try {
             String tracklist = formatTracklist(metadata.tracks());
@@ -63,9 +73,68 @@ public class TrackMatcher {
         return matchMap;
     }
 
-    /**
-     * Fallback matching when AI fails - uses filename patterns and heuristics
-     */
+    private Map<String, TrackMatch> tryMatchFromExistingTags(List<Path> audioFiles, ReleaseMetadata metadata) {
+        Map<String, TrackMatch> matchMap = new HashMap<>();
+
+        if (metadata.tracks() == null || metadata.tracks().isEmpty()) {
+            return matchMap;
+        }
+
+        int successfulMatches = 0;
+        for (Path file : audioFiles) {
+            try {
+                AudioFile audioFile = AudioFileIO.read(file.toFile());
+                Tag tag = audioFile.getTag();
+                if (tag == null) {
+                    continue;
+                }
+
+                String trackNumberStr = tag.getFirst(FieldKey.TRACK);
+                if (trackNumberStr == null || trackNumberStr.isEmpty()) {
+                    continue;
+                }
+
+                // Parse track number (handle formats like "1", "01", "1/12", etc.)
+                int trackNumber = parseTrackNumber(trackNumberStr);
+                if (trackNumber <= 0 || trackNumber > metadata.tracks().size()) {
+                    log.debug("Track number {} from {} is out of range (1-{}), skipping",
+                            trackNumber, file.getFileName(), metadata.tracks().size());
+                    continue;
+                }
+
+                // Create match using track number from tag
+                var trackMetadata = metadata.tracks().get(trackNumber - 1);
+                TrackMatch match = new TrackMatch(trackNumber, trackMetadata.artist(), trackMetadata.title());
+                matchMap.put(file.getFileName().toString(), match);
+                successfulMatches++;
+
+                log.debug("Matched {} using existing track number {} from tags", file.getFileName(), trackNumber);
+
+            } catch (Exception ex) {
+                log.debug("Could not read track number from {}: {}", file.getFileName(), ex.getMessage());
+            }
+        }
+
+        if (successfulMatches > 0 && successfulMatches == audioFiles.size()) {
+            log.info("All {} files have valid track numbers in tags, using them instead of AI", successfulMatches);
+        } else if (successfulMatches > 0) {
+            log.info("Only {}/{} files have valid track numbers, will use AI matching", successfulMatches, audioFiles.size());
+            matchMap.clear(); // Don't use partial results
+        }
+
+        return matchMap;
+    }
+
+    private int parseTrackNumber(String trackNumberStr) {
+        // Handle formats like "1", "01", "1/12", "01/12"
+        String[] parts = trackNumberStr.split("[/\\\\]");
+        try {
+            return Integer.parseInt(parts[0].trim());
+        } catch (NumberFormatException ex) {
+            return -1;
+        }
+    }
+
     public TrackMatch fallbackMatch(Path file, ReleaseMetadata metadata) {
         String filename = file.getFileName().toString();
 

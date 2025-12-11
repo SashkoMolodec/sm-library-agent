@@ -5,7 +5,7 @@ import java.util.List;
 public record ReleaseMetadata(
         String id,
         String masterId,
-        Source source,
+        SearchEngine source,
         String artist,
         String title,
         int score,
