@@ -41,6 +41,9 @@ public class Track {
     )
     private Set<Artist> artists = new HashSet<>();
 
+    @OneToMany(mappedBy = "track", cascade = CascadeType.ALL, orphanRemoval = true)
+    private Set<TrackTag> tags = new HashSet<>();
+
     public Track() {
     }
 
@@ -57,5 +60,33 @@ public class Track {
     public void removeArtist(Artist artist) {
         artists.remove(artist);
         artist.getTracks().remove(this);
+    }
+
+    public void setTag(String tagName, String tagValue) {
+        TrackTag tag = tags.stream()
+                .filter(t -> t.getTagName().equals(tagName))
+                .findFirst()
+                .orElseGet(() -> {
+                    TrackTag newTag = new TrackTag(this, tagName, tagValue);
+                    tags.add(newTag);
+                    return newTag;
+                });
+        tag.setTagValue(tagValue);
+        tag.setLastSyncedAt(java.time.LocalDateTime.now());
+    }
+
+    public java.util.Optional<String> getTag(String tagName) {
+        return tags.stream()
+                .filter(t -> t.getTagName().equals(tagName))
+                .findFirst()
+                .map(TrackTag::getTagValue);
+    }
+
+    public void removeTag(String tagName) {
+        tags.removeIf(t -> t.getTagName().equals(tagName));
+    }
+
+    public boolean hasTag(String tagName) {
+        return tags.stream().anyMatch(t -> t.getTagName().equals(tagName));
     }
 }

@@ -40,14 +40,17 @@ dependencies {
 	// Audio metadata tagging
 	implementation 'net.jthink:jaudiotagger:3.0.1'
 
+	// File system watching with native macOS support
+	implementation 'io.methvin:directory-watcher:0.18.0'
+
 	// AI integration for file matching
 	implementation 'dev.langchain4j:langchain4j-spring-boot-starter:1.8.0-beta15'
 	implementation 'dev.langchain4j:langchain4j-anthropic-spring-boot-starter:1.8.0-beta15'
 
 	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
-	testImplementation 'org.springframework.boot:spring-boot-starter-kafka-test'
-	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testImplementation 'org.springframework.kafka:spring-kafka-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 

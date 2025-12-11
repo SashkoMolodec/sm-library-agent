@@ -30,6 +30,7 @@ public class ReleaseService {
     private final ArtistRepository artistRepository;
     private final TagRepository tagRepository;
     private final LabelRepository labelRepository;
+    private final AudioTagExtractor tagExtractor;
 
     @Transactional
     public Release saveRelease(
@@ -104,6 +105,8 @@ public class ReleaseService {
                 Artist trackArtist = resolveTrackArtist(metadata, file);
                 track.addArtist(trackArtist);
 
+                extractAndStoreTags(track, file.newPath());
+
                 release.addTrack(track);
             }
         }
@@ -112,6 +115,27 @@ public class ReleaseService {
         log.info("Successfully saved release with ID: {}", savedRelease.getId());
 
         return savedRelease;
+    }
+
+    private void extractAndStoreTags(Track track, String filePath) {
+        try {
+            java.nio.file.Path audioFile = java.nio.file.Paths.get(filePath);
+            java.util.Map<String, String> tags = tagExtractor.extractAllTags(audioFile);
+
+            if (tags.isEmpty()) {
+                log.debug("No tags extracted from file: {}", filePath);
+                return;
+            }
+
+            for (java.util.Map.Entry<String, String> entry : tags.entrySet()) {
+                track.setTag(entry.getKey(), entry.getValue());
+            }
+
+            log.debug("Extracted and stored {} tags for track: {}", tags.size(), track.getTitle());
+
+        } catch (Exception e) {
+            log.error("Failed to extract tags from {}: {}", filePath, e.getMessage());
+        }
     }
 
     private Artist resolveTrackArtist(ReleaseMetadata metadata, FileOrganizer.OrganizedFile file) {
