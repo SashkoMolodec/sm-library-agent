@@ -44,17 +44,17 @@ public class FileOrganizer {
             Files.createDirectories(targetDir);
             log.info("Created/verified directory: {}", targetDir);
 
-            // Move audio files
+            // Copy audio files (keep originals as backup)
             List<OrganizedFile> organizedFiles = new ArrayList<>();
             for (ProcessedFile file : processedFiles) {
-                Path sourcePath = Paths.get(file.newPath());
+                Path sourcePath = Paths.get(file.originalPath());  // Use original path, not modified
                 Path targetPath = targetDir.resolve(sourcePath.getFileName());
 
-                Files.move(sourcePath, targetPath, StandardCopyOption.ATOMIC_MOVE);
-                log.info("Moved file: {} -> {}", sourcePath.getFileName(), targetPath);
+                Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+                log.info("Copied original file: {} -> {}", sourcePath.getFileName(), targetPath);
 
                 organizedFiles.add(new OrganizedFile(
-                        file.newPath(),
+                        file.originalPath(),
                         targetPath.toString(),
                         file.trackTitle(),
                         file.trackArtist(),
@@ -62,14 +62,14 @@ public class FileOrganizer {
                 ));
             }
 
-            // Move cover art if exists
+            // Copy cover art if exists (keep original as backup)
             String coverPath = null;
             Path sourceCover = Paths.get(currentDirectory).resolve("cover.jpg");
             if (Files.exists(sourceCover)) {
                 Path targetCover = targetDir.resolve("cover.jpg");
-                Files.move(sourceCover, targetCover, StandardCopyOption.REPLACE_EXISTING);
+                Files.copy(sourceCover, targetCover, StandardCopyOption.REPLACE_EXISTING);
                 coverPath = targetCover.toString();
-                log.info("Moved cover art to: {}", targetCover);
+                log.info("Copied cover art to: {}", targetCover);
             }
 
             return new OrganizationResult(

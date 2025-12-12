@@ -12,7 +12,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -62,6 +61,7 @@ public class ReprocessingService {
             } else {
                 byte[] coverArt = coverArtService.getCoverArt(metadata, directoryPath);
 
+                // Match files using tags (if valid) or filename-based matching
                 Map<String, TrackMatch> matchMap = trackMatcher.batchMatch(audioFiles, metadata);
 
                 // Re-tag all audio files
@@ -69,9 +69,13 @@ public class ReprocessingService {
                     try {
                         TrackMatch match = matchMap.get(file.getFileName().toString());
                         if (match == null) {
-                            log.warn("No match found for {}, using fallback", file.getFileName());
-                            match = trackMatcher.fallbackMatch(file, metadata);
+                            log.error("No match found for {} - this should not happen!", file.getFileName());
+                            errorCount++;
+                            continue;
                         }
+
+                        log.info("Tagging file {} with: trackNumber={}, title='{}', artist='{}'",
+                                file.getFileName(), match.trackNumber(), match.trackTitle(), match.artist());
 
                         audioTagger.tagFile(file, metadata, match, coverArt);
                         successCount++;
@@ -172,7 +176,8 @@ public class ReprocessingService {
                             trackInfo.artist(),
                             trackInfo.trackNumber()
                     ));
-                    log.debug("Read track {} from file: {}", trackInfo.trackNumber(), file.getFileName());
+                    log.info("Read track from file {}: trackNumber={}, title='{}', artist='{}'",
+                            file.getFileName(), trackInfo.trackNumber(), trackInfo.title(), trackInfo.artist());
                 } else {
                     log.warn("Could not read track info from {}, skipping", file.getFileName());
                 }

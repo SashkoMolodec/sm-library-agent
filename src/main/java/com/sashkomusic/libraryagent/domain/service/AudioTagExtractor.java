@@ -59,7 +59,16 @@ public class AudioTagExtractor {
         addTagIfPresent(tag, FieldKey.BPM, "TBPM", tags);
         addTagIfPresent(tag, FieldKey.KEY, "TKEY", tags);
 
+        // Extract rating - try both MP3 (RATING) and FLAC (RATING WMP) formats
         String rating = tag.getFirst(FieldKey.RATING);
+        if (rating == null || rating.isEmpty()) {
+            // FLAC files use "RATING WMP" Vorbis comment
+            try {
+                rating = tag.getFirst("RATING WMP");
+            } catch (Exception e) {
+                log.trace("Failed to extract RATING WMP: {}", e.getMessage());
+            }
+        }
         if (rating != null && !rating.isEmpty()) {
             tags.put("RATING", rating);
         }

@@ -56,11 +56,30 @@ public class LibraryProcessingService {
     }
 
     private ProcessingResult processFiles(ProcessLibraryTaskDto task, ReleaseMetadata metadata, byte[] coverArt) {
-        List<ProcessedFile> results = new ArrayList<>();
         List<String> errors = new ArrayList<>();
 
+        List<Path> audioFiles = collectAudioFiles(task.downloadedFiles());
+        if (audioFiles.isEmpty()) {
+            return ProcessingResult.failure("No audio files found", errors);
+        }
+
+        Map<String, TrackMatch> matchMap = matchFilesToTracks(audioFiles, metadata);
+        List<ProcessedFile> processedFiles = createProcessedFiles(audioFiles, matchMap, errors);
+
+        if (processedFiles.isEmpty()) {
+            return ProcessingResult.failure("No files were successfully processed", errors);
+        }
+
+        OrganizationContext orgContext = organizeIntoLibrary(processedFiles, metadata, task, coverArt, errors);
+        saveToDatabase(metadata, orgContext.directoryPath, orgContext.coverPath, orgContext.organizedFiles, errors);
+
+        log.info("Library processing completed successfully: {} files processed", processedFiles.size());
+        return ProcessingResult.success(orgContext.directoryPath, processedFiles, errors);
+    }
+
+    private List<Path> collectAudioFiles(List<String> filePaths) {
         List<Path> audioFiles = new ArrayList<>();
-        for (String filePath : task.downloadedFiles()) {
+        for (String filePath : filePaths) {
             Path file = Paths.get(filePath);
             if (Files.isRegularFile(file) && isAudioFile(file)) {
                 audioFiles.add(file);
@@ -68,16 +87,57 @@ public class LibraryProcessingService {
                 log.debug("Skipping non-audio file: {}", file.getFileName());
             }
         }
+        log.info("Collected {} audio files", audioFiles.size());
+        return audioFiles;
+    }
 
-        if (audioFiles.isEmpty()) {
-            log.warn("No audio files found to process");
-            return ProcessingResult.failure("No audio files found", errors);
-        }
-
+    private Map<String, TrackMatch> matchFilesToTracks(List<Path> audioFiles, ReleaseMetadata metadata) {
         Map<String, TrackMatch> matchMap = trackMatcher.batchMatch(audioFiles, metadata);
         log.info("Batch matched {} files", matchMap.size());
 
+        List<Path> unmatchedFiles = audioFiles.stream()
+                .filter(file -> !matchMap.containsKey(file.getFileName().toString()))
+                .toList();
+
+        if (!unmatchedFiles.isEmpty()) {
+            handleUnmatchedFiles(unmatchedFiles, matchMap, metadata, audioFiles.size());
+        }
+
+        return matchMap;
+    }
+
+    private void handleUnmatchedFiles(List<Path> unmatchedFiles, Map<String, TrackMatch> matchMap,
+                                      ReleaseMetadata metadata, int totalFiles) {
+        boolean completeFailure = matchMap.isEmpty() && unmatchedFiles.size() == totalFiles;
+
+        if (completeFailure) {
+            log.warn("Complete matching failure: all {} files unmatched. Starting from track 1", unmatchedFiles.size());
+        } else {
+            log.info("Found {} unmatched files (bonus tracks)", unmatchedFiles.size());
+        }
+
+        int startingTrackNumber = completeFailure ? 1 :
+                (metadata.tracks() != null && !metadata.tracks().isEmpty() ? metadata.tracks().size() + 1 : 1);
+
+        for (int i = 0; i < unmatchedFiles.size(); i++) {
+            Path file = unmatchedFiles.get(i);
+            String filename = file.getFileName().toString();
+            int trackNumber = startingTrackNumber + i;
+
+            String trackTitle = extractTitleFromFilename(filename);
+            String trackArtist = extractArtistFromFilename(file, metadata.artist());
+
+            matchMap.put(filename, new TrackMatch(trackNumber, trackArtist, trackTitle));
+            log.info("Assigned unmatched file '{}': track {} - '{}' by '{}'",
+                    filename, trackNumber, trackTitle, trackArtist);
+        }
+    }
+
+    private List<ProcessedFile> createProcessedFiles(List<Path> audioFiles, Map<String, TrackMatch> matchMap,
+                                                      List<String> errors) {
+        List<ProcessedFile> results = new ArrayList<>();
         int fileIndex = 0;
+
         for (Path file : audioFiles) {
             fileIndex++;
             log.info("Processing file {}/{}: {}", fileIndex, audioFiles.size(), file.getFileName());
@@ -85,16 +145,11 @@ public class LibraryProcessingService {
             try {
                 TrackMatch match = matchMap.get(file.getFileName().toString());
                 if (match == null) {
-                    log.warn("No batch match found for {}, using fallback", file.getFileName());
-                    match = trackMatcher.fallbackMatch(file, metadata);
+                    throw new IllegalStateException("No match found for file: " + file.getFileName());
                 }
 
-                ProcessedFile processedFile = processFile(file, metadata, coverArt, match);
+                ProcessedFile processedFile = processFile(file, match);
                 results.add(processedFile);
-                log.info("Successfully processed {}/{}: original={}, new={}, track={} - {}",
-                        fileIndex, audioFiles.size(),
-                        file.getFileName(), Paths.get(processedFile.newPath()).getFileName(),
-                        processedFile.trackNumber(), processedFile.trackTitle());
 
             } catch (Exception ex) {
                 log.error("Error processing file {}/{} ({}): {}", fileIndex, audioFiles.size(),
@@ -103,59 +158,84 @@ public class LibraryProcessingService {
             }
         }
 
-        if (results.isEmpty()) {
-            return ProcessingResult.failure("No files were successfully processed", errors);
-        }
-
         if (!errors.isEmpty()) {
-            log.warn("Processing completed with {} errors out of {} files",
-                    errors.size(), task.downloadedFiles().size());
+            log.warn("Processing completed with {} errors out of {} files", errors.size(), audioFiles.size());
         }
 
+        return results;
+    }
+
+    private OrganizationContext organizeIntoLibrary(List<ProcessedFile> processedFiles, ReleaseMetadata metadata,
+                                                     ProcessLibraryTaskDto task, byte[] coverArt, List<String> errors) {
         String directoryPath = task.directoryPath();
         String coverPath = null;
         List<FileOrganizer.OrganizedFile> organizedFiles;
 
-        if (libraryConfig.getOrganization().isEnabled()) {
-            try {
-                FileOrganizer.OrganizationResult organized = fileOrganizer.organize(
-                        metadata,
-                        task.directoryPath(),
-                        results,
-                        libraryConfig.getRootPath()
-                );
-
-                directoryPath = organized.newDirectoryPath();
-                coverPath = organized.newCoverPath();
-                organizedFiles = organized.files();
-
-                log.info("Files organized into library structure: {}", directoryPath);
-
-            } catch (Exception ex) {
-                log.error("Failed to organize files, using original paths: {}", ex.getMessage(), ex);
-                errors.add("Failed to organize files: " + ex.getMessage());
-                organizedFiles = results.stream()
-                        .map(pf -> new FileOrganizer.OrganizedFile(
-                                pf.originalPath(),
-                                pf.newPath(),
-                                pf.trackTitle(),
-                                pf.trackArtist(),
-                                pf.trackNumber()
-                        ))
-                        .toList();
-            }
-        } else {
-            organizedFiles = results.stream()
+        if (!libraryConfig.getOrganization().isEnabled()) {
+            organizedFiles = processedFiles.stream()
                     .map(pf -> new FileOrganizer.OrganizedFile(
-                            pf.originalPath(),
-                            pf.newPath(),
-                            pf.trackTitle(),
-                            pf.trackArtist(),
-                            pf.trackNumber()
-                    ))
+                            pf.originalPath(), pf.newPath(), pf.trackTitle(), pf.trackArtist(), pf.trackNumber()))
+                    .toList();
+            return new OrganizationContext(directoryPath, coverPath, organizedFiles);
+        }
+
+        try {
+            FileOrganizer.OrganizationResult organized = fileOrganizer.organize(
+                    metadata, task.directoryPath(), processedFiles, libraryConfig.getRootPath());
+
+            directoryPath = organized.newDirectoryPath();
+            coverPath = organized.newCoverPath();
+            organizedFiles = organized.files();
+
+            log.info("Files organized into library structure: {}", directoryPath);
+
+            organizedFiles = renameAndTagInLibrary(organizedFiles, metadata, coverArt, errors);
+
+        } catch (Exception ex) {
+            log.error("Failed to organize files: {}", ex.getMessage(), ex);
+            errors.add("Failed to organize files: " + ex.getMessage());
+            organizedFiles = processedFiles.stream()
+                    .map(pf -> new FileOrganizer.OrganizedFile(
+                            pf.originalPath(), pf.newPath(), pf.trackTitle(), pf.trackArtist(), pf.trackNumber()))
                     .toList();
         }
 
+        return new OrganizationContext(directoryPath, coverPath, organizedFiles);
+    }
+
+    private List<FileOrganizer.OrganizedFile> renameAndTagInLibrary(
+            List<FileOrganizer.OrganizedFile> organizedFiles, ReleaseMetadata metadata,
+            byte[] coverArt, List<String> errors) {
+
+        List<FileOrganizer.OrganizedFile> finalFiles = new ArrayList<>();
+
+        for (FileOrganizer.OrganizedFile orgFile : organizedFiles) {
+            try {
+                Path copiedFile = Paths.get(orgFile.newPath());
+                TrackMatch match = new TrackMatch(orgFile.trackNumber(), orgFile.trackArtist(), orgFile.trackTitle());
+
+                Path renamedFile = fileRenamer.rename(copiedFile, match, match.artist());
+                log.info("Renamed in library: {} -> {}", copiedFile.getFileName(), renamedFile.getFileName());
+
+                audioTagger.tagFile(renamedFile, metadata, match, coverArt);
+                log.info("Tagged in library: {}", renamedFile.getFileName());
+
+                finalFiles.add(new FileOrganizer.OrganizedFile(
+                        orgFile.oldPath(), renamedFile.toString(), orgFile.trackTitle(),
+                        orgFile.trackArtist(), orgFile.trackNumber()));
+
+            } catch (Exception ex) {
+                log.error("Failed to rename/tag {}: {}", orgFile.newPath(), ex.getMessage(), ex);
+                errors.add("Failed to process " + Paths.get(orgFile.newPath()).getFileName() + ": " + ex.getMessage());
+                finalFiles.add(orgFile);
+            }
+        }
+
+        return finalFiles;
+    }
+
+    private void saveToDatabase(ReleaseMetadata metadata, String directoryPath, String coverPath,
+                                 List<FileOrganizer.OrganizedFile> organizedFiles, List<String> errors) {
         try {
             releaseService.saveRelease(metadata, directoryPath, coverPath, organizedFiles, processingVersion);
             log.info("Release saved to database successfully");
@@ -165,23 +245,21 @@ public class LibraryProcessingService {
             log.error("Failed to save release to database: {}", ex.getMessage(), ex);
             errors.add("Failed to save release to database: " + ex.getMessage());
         }
-
-        log.info("Library processing completed successfully: {} files processed", results.size());
-        return ProcessingResult.success(directoryPath, results, errors);
     }
 
-    private ProcessedFile processFile(Path file, ReleaseMetadata metadata, byte[] coverArt, TrackMatch match) {
+    private record OrganizationContext(
+            String directoryPath,
+            String coverPath,
+            List<FileOrganizer.OrganizedFile> organizedFiles
+    ) {}
+
+    private ProcessedFile processFile(Path file, TrackMatch match) {
         String originalPath = file.toString();
-
         log.info("Matched {} to track {}: {} by {}", file.getFileName(), match.trackNumber(), match.trackTitle(), match.artist());
-
-        Path renamedFile = fileRenamer.rename(file, match, match.artist());
-
-        audioTagger.tagFile(renamedFile, metadata, match, coverArt);
 
         return new ProcessedFile(
                 originalPath,
-                renamedFile.toString(),
+                originalPath,
                 match.trackTitle(),
                 match.artist(),
                 match.trackNumber()
@@ -197,6 +275,53 @@ public class LibraryProcessingService {
                 filename.endsWith(".wav") ||
                 filename.endsWith(".opus") ||
                 filename.endsWith(".aac");
+    }
+
+    private String extractTitleFromFilename(String filename) {
+        // Remove extension
+        String nameWithoutExt = filename.replaceAll("\\.[^.]+$", "");
+
+        // Remove track number prefix (e.g., "05. ", "A1 ", "01 - ")
+        nameWithoutExt = nameWithoutExt.replaceAll("^[A-Z]?\\d+[\\s.-]+", "");
+
+        // If format is "artist - title", extract only title
+        if (nameWithoutExt.contains(" - ")) {
+            String[] parts = nameWithoutExt.split(" - ", 2);
+            if (parts.length == 2) {
+                return parts[1].trim().toLowerCase();
+            }
+        }
+
+        return nameWithoutExt.trim().toLowerCase();
+    }
+
+    private String extractArtistFromFilename(Path file, String releaseArtist) {
+        String filename = file.getFileName().toString();
+
+        // Remove extension and track number
+        String nameWithoutExt = filename.replaceAll("\\.[^.]+$", "");
+        nameWithoutExt = nameWithoutExt.replaceAll("^[A-Z]?\\d+[\\s.-]+", "");
+
+        // If format is "artist - title", extract artist
+        if (nameWithoutExt.contains(" - ")) {
+            String[] parts = nameWithoutExt.split(" - ", 2);
+            if (parts.length == 2 && !parts[0].trim().isEmpty()) {
+                return parts[0].trim();
+            }
+        }
+
+        // Try reading artist from existing file tags
+        try {
+            AudioTagger.TrackInfo trackInfo = audioTagger.readTrackInfo(file);
+            if (trackInfo != null && trackInfo.artist() != null && !trackInfo.artist().isEmpty()) {
+                return trackInfo.artist();
+            }
+        } catch (Exception e) {
+            log.debug("Could not read artist from file tags for {}: {}", filename, e.getMessage());
+        }
+
+        // Fallback to release artist
+        return releaseArtist;
     }
 
     public record ProcessingResult(
