@@ -8,12 +8,14 @@ import org.jaudiotagger.audio.AudioFile;
 import org.jaudiotagger.audio.AudioFileIO;
 import org.jaudiotagger.tag.FieldKey;
 import org.jaudiotagger.tag.Tag;
+import org.jaudiotagger.tag.flac.FlacTag;
 import org.jaudiotagger.tag.id3.AbstractID3v2Tag;
 import org.jaudiotagger.tag.id3.ID3v24Frames;
 import org.jaudiotagger.tag.id3.framebody.FrameBodyTXXX;
 import org.jaudiotagger.tag.id3.ID3v24Frame;
 import org.jaudiotagger.tag.images.Artwork;
 import org.jaudiotagger.tag.images.ArtworkFactory;
+import org.jaudiotagger.tag.vorbiscomment.VorbisCommentTag;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
@@ -30,8 +32,17 @@ public class AudioTagger {
             AudioFile f = AudioFileIO.read(audioFile.toFile());
             Tag tag = f.getTagOrCreateAndSetDefault();
 
+            String existingKey = tag.getFirst(FieldKey.KEY);
+            String existingBpm = tag.getFirst(FieldKey.BPM);
+
             log.debug("Writing tags: album_artist='{}', artist='{}', album='{}', track={} - '{}'",
                     metadata.artist(), match.artist(), metadata.title(), match.trackNumber(), match.trackTitle());
+            if (existingKey != null && !existingKey.isEmpty()) {
+                log.debug("Preserving existing KEY: {}", existingKey);
+            }
+            if (existingBpm != null && !existingBpm.isEmpty()) {
+                log.debug("Preserving existing BPM: {}", existingBpm);
+            }
 
             // Use per-track artist for ARTIST tag
             tag.setField(FieldKey.ARTIST, match.artist());
@@ -56,7 +67,7 @@ public class AudioTagger {
             }
 
             if (metadata.label() != null && !metadata.label().isEmpty()) {
-                tag.setField(FieldKey.RECORD_LABEL, metadata.label());
+                setLabelTag(tag, audioFile, metadata.label());
             }
 
             if (metadata.tags() != null && !metadata.tags().isEmpty()) {
@@ -90,6 +101,15 @@ public class AudioTagger {
                 }
             }
 
+            if (existingKey != null && !existingKey.isEmpty()) {
+                tag.setField(FieldKey.KEY, existingKey);
+                log.debug("Restored KEY: {}", existingKey);
+            }
+            if (existingBpm != null && !existingBpm.isEmpty()) {
+                tag.setField(FieldKey.BPM, existingBpm);
+                log.debug("Restored BPM: {}", existingBpm);
+            }
+
             f.commit();
 
             log.info("Successfully tagged and saved: {} - {}", match.trackNumber(), match.trackTitle());
@@ -119,6 +139,58 @@ public class AudioTagger {
             log.debug("Added custom field: {}={}", description, value);
         } catch (Exception e) {
             log.warn("Failed to add custom field {}: {}", description, e.getMessage());
+        }
+    }
+
+    /**
+     * Sets the label/publisher tag in a format-appropriate way.
+     * For FLAC files: writes ORGANIZATION tag (Traktor-compatible) and removes LABEL
+     * For MP3 files: writes TPUB frame via RECORD_LABEL
+     * For M4A: writes to publisher atom
+     */
+    private void setLabelTag(Tag tag, Path audioFile, String label) {
+        try {
+            String filename = audioFile.getFileName().toString().toLowerCase();
+            if (filename.endsWith(".flac") || filename.endsWith(".ogg")) {
+                // FLAC uses FlacTag which wraps VorbisCommentTag
+                VorbisCommentTag vorbisTag = null;
+
+                if (tag instanceof FlacTag flacTag) {
+                    vorbisTag = flacTag.getVorbisCommentTag();
+                } else if (tag instanceof VorbisCommentTag) {
+                    vorbisTag = (VorbisCommentTag) tag;
+                }
+
+                if (vorbisTag != null) {
+                    // Delete both LABEL and ORGANIZATION to ensure clean state
+                    try {
+                        vorbisTag.deleteField("LABEL");
+                        log.debug("Deleted old LABEL field");
+                    } catch (Exception e) {
+                        log.trace("No LABEL field to delete");
+                    }
+                    try {
+                        vorbisTag.deleteField("ORGANIZATION");
+                        log.trace("Deleted old ORGANIZATION field");
+                    } catch (Exception e) {
+                        log.trace("No ORGANIZATION field to delete");
+                    }
+
+                    // Set new ORGANIZATION
+                    vorbisTag.setField("ORGANIZATION", label);
+                    log.debug("Set ORGANIZATION (Vorbis): {}", label);
+                } else {
+                    // Fallback (shouldn't happen)
+                    log.warn("FLAC file but cannot get VorbisCommentTag, using RECORD_LABEL fallback");
+                    tag.setField(FieldKey.RECORD_LABEL, label);
+                }
+            } else {
+                // MP3, M4A and other formats - RECORD_LABEL maps to TPUB/publisher
+                tag.setField(FieldKey.RECORD_LABEL, label);
+                log.debug("Set RECORD_LABEL ({}): {}", filename.substring(filename.lastIndexOf('.') + 1), label);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to set label for {}: {}", audioFile.getFileName(), e.getMessage());
         }
     }
 

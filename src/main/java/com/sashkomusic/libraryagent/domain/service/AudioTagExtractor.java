@@ -59,19 +59,9 @@ public class AudioTagExtractor {
         addTagIfPresent(tag, FieldKey.BPM, "TBPM", tags);
         addTagIfPresent(tag, FieldKey.KEY, "TKEY", tags);
 
-        // Extract rating - try both MP3 (RATING) and FLAC (RATING WMP) formats
-        String rating = tag.getFirst(FieldKey.RATING);
-        if (rating == null || rating.isEmpty()) {
-            // FLAC files use "RATING WMP" Vorbis comment
-            try {
-                rating = tag.getFirst("RATING WMP");
-            } catch (Exception e) {
-                log.trace("Failed to extract RATING WMP: {}", e.getMessage());
-            }
-        }
-        if (rating != null && !rating.isEmpty()) {
-            tags.put("RATING", rating);
-        }
+        extractInitialKey(tag, tags);
+        extractRating(tag, tags);
+        extractLabel(tag, tags);
 
         addTagIfPresent(tag, FieldKey.TRACK, "TRCK", tags);
         addTagIfPresent(tag, FieldKey.DISC_NO, "TPOS", tags);
@@ -113,6 +103,62 @@ public class AudioTagExtractor {
             }
         } catch (Exception e) {
             log.trace("Failed to extract {}: {}", frameName, e.getMessage());
+        }
+    }
+
+    /**
+     * Extracts INITIALKEY tag (Traktor Pro key notation like "1m" for D minor)
+     */
+    private void extractInitialKey(Tag tag, Map<String, String> tags) {
+        try {
+            String initialKey = tag.getFirst("INITIALKEY");
+            if (initialKey != null && !initialKey.isEmpty()) {
+                tags.put("INITIALKEY", initialKey);
+            }
+        } catch (Exception e) {
+            log.trace("Failed to extract INITIALKEY: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Extracts rating, preferring "RATING WMP" (Traktor/WMP format with values 0, 51, 102, 153, 204, 255)
+     * Falls back to standard RATING field if RATING WMP is not present.
+     * Used for FLAC and M4A files where both tags may exist.
+     */
+    private void extractRating(Tag tag, Map<String, String> tags) {
+        String rating = null;
+        try {
+            rating = tag.getFirst("RATING WMP");
+        } catch (Exception e) {
+            log.trace("Failed to extract RATING WMP: {}", e.getMessage());
+        }
+
+        if (rating == null || rating.isEmpty()) {
+            rating = tag.getFirst(FieldKey.RATING);
+        }
+
+        if (rating != null && !rating.isEmpty()) {
+            tags.put("RATING", rating);
+        }
+    }
+
+    /**
+     * Extracts label/publisher tag.
+     * For FLAC: tries ORGANIZATION first (Traktor-compatible)
+     * Falls back to RECORD_LABEL (MP3 TPUB frame)
+     */
+    private void extractLabel(Tag tag, Map<String, String> tags) {
+        String label = null;
+        try {
+            label = tag.getFirst("ORGANIZATION");
+        } catch (Exception e) {
+            log.trace("Failed to extract ORGANIZATION: {}", e.getMessage());
+        }
+        if (label == null || label.isEmpty()) {
+            label = tag.getFirst(FieldKey.RECORD_LABEL);
+        }
+        if (label != null && !label.isEmpty()) {
+            tags.put("PUBLISHER", label);
         }
     }
 
