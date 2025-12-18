@@ -41,9 +41,9 @@ public class LibraryProcessingService {
         log.info("Starting library processing for chatId={}, directory={}",
                 task.chatId(), task.directoryPath());
 
-        String mappedDirectory = pathMappingService.mapPath(task.directoryPath());
+        String mappedDirectory = pathMappingService.mapProcessPath(task.directoryPath());
         List<String> mappedFiles = task.downloadedFiles().stream()
-                .map(pathMappingService::mapPath)
+                .map(pathMappingService::mapProcessPath)
                 .toList();
         ProcessLibraryTaskDto mappedTask = new ProcessLibraryTaskDto(
                 task.chatId(),

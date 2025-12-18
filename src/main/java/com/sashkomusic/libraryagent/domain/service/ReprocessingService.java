@@ -34,7 +34,7 @@ public class ReprocessingService {
     public ReprocessResult reprocess(String directoryPath, ReleaseMetadata metadata, int newVersion,
                                       ReprocessOptions options) {
         
-        String mappedDirectoryPath = pathMappingService.mapPath(directoryPath);
+        String mappedDirectoryPath = pathMappingService.mapReprocessPath(directoryPath);
         log.info("Starting reprocessing for: {} (mapped from: {}) (options={})", 
                 mappedDirectoryPath, directoryPath, options);
         log.info("Metadata: {} - {} (version {})", metadata.artist(), metadata.title(), newVersion);

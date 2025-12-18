@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "path.mapping")
 public class PathMappingConfig {
     private boolean enabled;
-    private String source;
+    private String reprocessSource;
+    private String processSource;
     private String target;
 }
