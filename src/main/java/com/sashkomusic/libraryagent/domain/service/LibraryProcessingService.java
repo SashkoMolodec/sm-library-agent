@@ -35,24 +35,38 @@ public class LibraryProcessingService {
     private final FileOrganizer fileOrganizer;
     private final LibraryConfig libraryConfig;
     private final ReleaseMetadataWriter metadataWriter;
+    private final PathMappingService pathMappingService;
 
     public ProcessingResult processLibrary(ProcessLibraryTaskDto task) {
         log.info("Starting library processing for chatId={}, directory={}",
                 task.chatId(), task.directoryPath());
 
-        ReleaseMetadata metadata = task.metadata();
+        String mappedDirectory = pathMappingService.mapPath(task.directoryPath());
+        List<String> mappedFiles = task.downloadedFiles().stream()
+                .map(pathMappingService::mapPath)
+                .toList();
+        ProcessLibraryTaskDto mappedTask = new ProcessLibraryTaskDto(
+                task.chatId(),
+                mappedDirectory,
+                mappedFiles,
+                task.metadata()
+        );
+
+        log.info("Mapped directory path: {} -> {}", task.directoryPath(), mappedDirectory);
+
+        ReleaseMetadata metadata = mappedTask.metadata();
         log.info("Metadata: artist='{}', title='{}', trackTitles={}",
                 metadata.artist(), metadata.title(),
                 metadata.trackTitles() != null ? metadata.trackTitles().size() + " tracks" : "NULL");
 
-        ValidationResult validation = fileValidator.validate(task);
+        ValidationResult validation = fileValidator.validate(mappedTask);
         if (!validation.isValid()) {
             log.error("Validation failed: {}", validation.getErrorMessage());
             return ProcessingResult.failure(validation.getErrorMessage(), List.of());
         }
 
-        byte[] coverArt = coverArtService.getCoverArt(metadata, task.directoryPath());
-        return processFiles(task, metadata, coverArt);
+        byte[] coverArt = coverArtService.getCoverArt(metadata, mappedTask.directoryPath());
+        return processFiles(mappedTask, metadata, coverArt);
     }
 
     private ProcessingResult processFiles(ProcessLibraryTaskDto task, ReleaseMetadata metadata, byte[] coverArt) {

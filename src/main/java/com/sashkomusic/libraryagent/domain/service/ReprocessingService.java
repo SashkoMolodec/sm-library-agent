@@ -28,25 +28,29 @@ public class ReprocessingService {
     private final ReleaseMetadataWriter metadataWriter;
     private final ReleaseRepository releaseRepository;
     private final ReleaseService releaseService;
+    private final PathMappingService pathMappingService;
 
     @Transactional
     public ReprocessResult reprocess(String directoryPath, ReleaseMetadata metadata, int newVersion,
                                       ReprocessOptions options) {
-        log.info("Starting reprocessing for: {} (options={})", directoryPath, options);
+        
+        String mappedDirectoryPath = pathMappingService.mapPath(directoryPath);
+        log.info("Starting reprocessing for: {} (mapped from: {}) (options={})", 
+                mappedDirectoryPath, directoryPath, options);
         log.info("Metadata: {} - {} (version {})", metadata.artist(), metadata.title(), newVersion);
 
         try {
-            Path releaseDir = Paths.get(directoryPath);
+            Path releaseDir = Paths.get(mappedDirectoryPath);
 
             if (!Files.exists(releaseDir) || !Files.isDirectory(releaseDir)) {
-                log.error("Directory not found or not a directory: {}", directoryPath);
-                return ReprocessResult.failure("Directory not found: " + directoryPath);
+                log.error("Directory not found or not a directory: {}", mappedDirectoryPath);
+                return ReprocessResult.failure("Directory not found: " + mappedDirectoryPath);
             }
 
             List<Path> audioFiles = findAudioFiles(releaseDir);
 
             if (audioFiles.isEmpty()) {
-                log.warn("No audio files found in: {}", directoryPath);
+                log.warn("No audio files found in: {}", mappedDirectoryPath);
                 return ReprocessResult.failure("No audio files found");
             }
 
@@ -59,7 +63,7 @@ public class ReprocessingService {
                 log.info("Skipping audio file re-tagging (--skip-retag flag set)");
                 successCount = audioFiles.size();
             } else {
-                byte[] coverArt = coverArtService.getCoverArt(metadata, directoryPath);
+                byte[] coverArt = coverArtService.getCoverArt(metadata, mappedDirectoryPath);
 
                 // Match files using tags (if valid) or filename-based matching
                 Map<String, TrackMatch> matchMap = trackMatcher.batchMatch(audioFiles, metadata);
@@ -93,14 +97,14 @@ public class ReprocessingService {
             }
 
             try {
-                metadataWriter.writeMetadata(directoryPath, metadata, newVersion);
+                metadataWriter.writeMetadata(mappedDirectoryPath, metadata, newVersion);
                 log.info("Updated metadata file with version {}", newVersion);
             } catch (Exception ex) {
                 log.error("Failed to update metadata file: {}", ex.getMessage());
             }
 
             try {
-                updateReleaseVersion(metadata.id(), newVersion, directoryPath, metadata, audioFiles);
+                updateReleaseVersion(metadata.id(), newVersion, mappedDirectoryPath, metadata, audioFiles);
                 log.info("Updated database with new version");
             } catch (Exception ex) {
                 log.error("Failed to update database: {}", ex.getMessage());
@@ -114,7 +118,7 @@ public class ReprocessingService {
             return ReprocessResult.success(message, successCount, errorCount);
 
         } catch (Exception ex) {
-            log.error("Failed to reprocess {}: {}", directoryPath, ex.getMessage(), ex);
+            log.error("Failed to reprocess {}: {}", mappedDirectoryPath, ex.getMessage(), ex);
             return ReprocessResult.failure("Reprocessing failed: " + ex.getMessage());
         }
     }
