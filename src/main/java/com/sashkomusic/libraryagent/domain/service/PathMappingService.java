@@ -11,19 +11,17 @@ public class PathMappingService {
     private final PathMappingConfig pathMappingConfig;
 
     public String mapProcessPath(String originalPath) {
-        return mapPath(originalPath, pathMappingConfig.getProcessSource());
+        return mapPath(originalPath, pathMappingConfig.getProcessSource(), pathMappingConfig.getProcessTarget());
     }
 
     public String mapReprocessPath(String originalPath) {
-        return mapPath(originalPath, pathMappingConfig.getReprocessSource());
+        return mapPath(originalPath, pathMappingConfig.getReprocessSource(), pathMappingConfig.getReprocessTarget());
     }
 
-    private String mapPath(String originalPath, String source) {
+    private String mapPath(String originalPath, String source, String target) {
         if (!pathMappingConfig.isEnabled() || originalPath == null) {
             return originalPath;
         }
-
-        String target = pathMappingConfig.getTarget();
 
         if (source == null || target == null || source.isEmpty() || target.isEmpty()) {
             return originalPath;

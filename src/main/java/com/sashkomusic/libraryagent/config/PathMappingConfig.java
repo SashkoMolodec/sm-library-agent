@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 public class PathMappingConfig {
     private boolean enabled;
     private String reprocessSource;
+    private String reprocessTarget;
     private String processSource;
-    private String target;
+    private String processTarget;
 }
