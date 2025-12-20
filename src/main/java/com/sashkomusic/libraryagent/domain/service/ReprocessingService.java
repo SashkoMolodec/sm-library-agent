@@ -63,7 +63,7 @@ public class ReprocessingService {
                 byte[] coverArt = coverArtService.getCoverArt(metadata, directoryPath);
 
                 // Match files using tags (if valid) or filename-based matching
-                Map<String, TrackMatch> matchMap = trackMatcher.batchMatch(audioFiles, metadata);
+                Map<String, TrackMatch> matchMap = trackMatcher.tagMatch(audioFiles, metadata);
 
                 // Re-tag all audio files
                 for (Path file : audioFiles) {

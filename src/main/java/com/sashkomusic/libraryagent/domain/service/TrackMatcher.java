@@ -2,6 +2,7 @@ package com.sashkomusic.libraryagent.domain.service;
 
 import com.sashkomusic.libraryagent.domain.model.ReleaseMetadata;
 import com.sashkomusic.libraryagent.domain.model.TrackMatch;
+import com.sashkomusic.libraryagent.domain.model.TrackMetadata;
 import lombok.extern.slf4j.Slf4j;
 import org.jaudiotagger.audio.AudioFile;
 import org.jaudiotagger.audio.AudioFileIO;
@@ -16,23 +17,22 @@ import java.util.*;
 @Service
 public class TrackMatcher {
 
-    public Map<String, TrackMatch> batchMatch(List<Path> audioFiles, ReleaseMetadata metadata) {
-        log.info("Matching {} audio files to {} tracks", audioFiles.size(),
+    public Map<String, TrackMatch> tagMatch(List<Path> audioFiles, ReleaseMetadata metadata) {
+        log.info("Attempting to match {} audio files to {} tracks using existing tags.",
+                audioFiles.size(),
                 metadata.tracks() != null ? metadata.tracks().size() : 0);
 
-        // Strategy 1: Try existing tags if available
         Map<String, TrackMatch> tagBasedMatches = matchFromExistingTags(audioFiles, metadata);
-        if (!tagBasedMatches.isEmpty() && tagBasedMatches.size() == audioFiles.size()) {
-            log.info("Successfully matched all files using existing tags");
+        if (tagBasedMatches.size() == audioFiles.size()) {
+            log.info("Successfully matched all files using existing tags.");
             return tagBasedMatches;
         }
 
-        // Strategy 2: Match based on filenames
-        log.info("Tag-based matching incomplete, using filename-based matching");
-        return matchFromFilenames(audioFiles, metadata);
+        log.info("Tag-based matching was incomplete (matched {} / {}).", tagBasedMatches.size(), audioFiles.size());
+        return Map.of();
     }
 
-    private Map<String, TrackMatch> matchFromFilenames(List<Path> audioFiles, ReleaseMetadata metadata) {
+    public Map<String, TrackMatch> matchFromFilenames(List<Path> audioFiles, ReleaseMetadata metadata) {
         List<Path> sortedFiles = new ArrayList<>(audioFiles);
         sortedFiles.sort(Comparator.comparing(p -> p.getFileName().toString()));
 
@@ -76,7 +76,7 @@ public class TrackMatcher {
         return new TrackMatch(nextTrackNumber, metadata.artist(), title);
     }
 
-    private Map<String, TrackMatch> matchFromExistingTags(List<Path> audioFiles, ReleaseMetadata metadata) {
+    public Map<String, TrackMatch> matchFromExistingTags(List<Path> audioFiles, ReleaseMetadata metadata) {
         if (metadata.tracks() == null || metadata.tracks().isEmpty()) {
             return Map.of();
         }

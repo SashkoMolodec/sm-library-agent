@@ -1,10 +1,7 @@
 package com.sashkomusic.libraryagent.domain.service;
 
 import com.sashkomusic.libraryagent.config.LibraryConfig;
-import com.sashkomusic.libraryagent.domain.model.ProcessedFile;
-import com.sashkomusic.libraryagent.domain.model.ReleaseMetadata;
-import com.sashkomusic.libraryagent.domain.model.TrackMatch;
-import com.sashkomusic.libraryagent.domain.model.ValidationResult;
+import com.sashkomusic.libraryagent.domain.model.*;
 import com.sashkomusic.libraryagent.messaging.consumer.dto.ProcessLibraryTaskDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +14,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @Slf4j
 @Service
@@ -92,17 +90,33 @@ public class LibraryProcessingService {
     }
 
     private Map<String, TrackMatch> matchFilesToTracks(List<Path> audioFiles, ReleaseMetadata metadata) {
-        Map<String, TrackMatch> matchMap = trackMatcher.batchMatch(audioFiles, metadata);
-        log.info("Batch matched {} files", matchMap.size());
+        return tryTagBasedMatching(audioFiles, metadata)
+                .orElseGet(() -> tryFilenameBasedMatching(audioFiles, metadata));
+    }
+
+    private Optional<Map<String, TrackMatch>> tryTagBasedMatching(List<Path> audioFiles, ReleaseMetadata metadata) {
+        Map<String, TrackMatch> matchMap = trackMatcher.tagMatch(audioFiles, metadata);
+        if (matchMap.size() == audioFiles.size()) {
+            log.info("Strategy 1 (Tags): Successfully matched all {} files.", audioFiles.size());
+            return Optional.of(matchMap);
+        }
+        log.info("Strategy 1 (Tags) failed to match all files ({} / {}).", matchMap.size(), audioFiles.size());
+        return Optional.empty();
+    }
+
+    private Map<String, TrackMatch> tryFilenameBasedMatching(List<Path> audioFiles, ReleaseMetadata metadata) {
+        log.info("Strategy 3: Falling back to filename-based matching.");
+
+        Map<String, TrackMatch> matchMap = trackMatcher.matchFromFilenames(audioFiles, metadata);
 
         List<Path> unmatchedFiles = audioFiles.stream()
                 .filter(file -> !matchMap.containsKey(file.getFileName().toString()))
                 .toList();
 
         if (!unmatchedFiles.isEmpty()) {
+            log.error("This should not happen: {} files still unmatched after filename matching.", unmatchedFiles.size());
             handleUnmatchedFiles(unmatchedFiles, matchMap, metadata, audioFiles.size());
         }
-
         return matchMap;
     }
 
@@ -134,13 +148,13 @@ public class LibraryProcessingService {
     }
 
     private List<ProcessedFile> createProcessedFiles(List<Path> audioFiles, Map<String, TrackMatch> matchMap,
-                                                      List<String> errors) {
+                                                     List<String> errors) {
         List<ProcessedFile> results = new ArrayList<>();
         int fileIndex = 0;
 
         for (Path file : audioFiles) {
             fileIndex++;
-            log.info("Processing file {}/{}: {}", fileIndex, audioFiles.size(), file.getFileName());
+            log.info("Processing file {}/{} : {}", fileIndex, audioFiles.size(), file.getFileName());
 
             try {
                 TrackMatch match = matchMap.get(file.getFileName().toString());
@@ -166,7 +180,7 @@ public class LibraryProcessingService {
     }
 
     private OrganizationContext organizeIntoLibrary(List<ProcessedFile> processedFiles, ReleaseMetadata metadata,
-                                                     ProcessLibraryTaskDto task, byte[] coverArt, List<String> errors) {
+                                                    ProcessLibraryTaskDto task, byte[] coverArt, List<String> errors) {
         String directoryPath = task.directoryPath();
         String coverPath = null;
         List<FileOrganizer.OrganizedFile> organizedFiles;
@@ -235,7 +249,7 @@ public class LibraryProcessingService {
     }
 
     private void saveToDatabase(ReleaseMetadata metadata, String directoryPath, String coverPath,
-                                 List<FileOrganizer.OrganizedFile> organizedFiles, List<String> errors) {
+                                List<FileOrganizer.OrganizedFile> organizedFiles, List<String> errors) {
         try {
             releaseService.saveRelease(metadata, directoryPath, coverPath, organizedFiles, processingVersion);
             log.info("Release saved to database successfully");
