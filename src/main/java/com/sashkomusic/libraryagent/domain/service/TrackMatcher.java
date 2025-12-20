@@ -2,7 +2,6 @@ package com.sashkomusic.libraryagent.domain.service;
 
 import com.sashkomusic.libraryagent.domain.model.ReleaseMetadata;
 import com.sashkomusic.libraryagent.domain.model.TrackMatch;
-import com.sashkomusic.libraryagent.domain.model.TrackMetadata;
 import lombok.extern.slf4j.Slf4j;
 import org.jaudiotagger.audio.AudioFile;
 import org.jaudiotagger.audio.AudioFileIO;
@@ -12,11 +11,111 @@ import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
 import java.util.*;
+import lombok.RequiredArgsConstructor;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class TrackMatcher {
 
+    private final AudioTagger audioTagger;
+
+    public Map<String, TrackMatch> match(List<Path> audioFiles, ReleaseMetadata metadata) {
+        log.info("Starting matching process for {} files", audioFiles.size());
+
+        Map<String, TrackMatch> matches = matchFromExistingTags(audioFiles, metadata);
+        if (matches.size() == audioFiles.size()) {
+            log.info("Strategy 1 (Tags): Successfully matched all files.");
+            return matches;
+        }
+
+        log.info("Strategy 1 (Tags) failed or incomplete. Falling back to Strategy 2 (Filenames).");
+        
+        Map<String, TrackMatch> filenameMatches = matchFromFilenames(audioFiles, metadata);
+        
+        List<Path> unmatchedFiles = audioFiles.stream()
+                .filter(file -> !filenameMatches.containsKey(file.getFileName().toString()))
+                .toList();
+
+        if (!unmatchedFiles.isEmpty()) {
+            handleUnmatchedFiles(unmatchedFiles, filenameMatches, metadata, audioFiles.size());
+        }
+
+        return filenameMatches;
+    }
+
+    private void handleUnmatchedFiles(List<Path> unmatchedFiles, Map<String, TrackMatch> matchMap,
+                                      ReleaseMetadata metadata, int totalFiles) {
+        boolean completeFailure = matchMap.isEmpty() && unmatchedFiles.size() == totalFiles;
+
+        if (completeFailure) {
+            log.warn("Complete matching failure: all {} files unmatched. Starting from track 1", unmatchedFiles.size());
+        } else {
+            log.info("Found {} unmatched files (bonus tracks)", unmatchedFiles.size());
+        }
+
+        int startingTrackNumber = (metadata.tracks() != null && !metadata.tracks().isEmpty()) 
+                ? metadata.tracks().size() + 1 : 1;
+
+        if (!matchMap.isEmpty()) {
+            startingTrackNumber = matchMap.values().stream()
+                    .mapToInt(TrackMatch::trackNumber)
+                    .max()
+                    .orElse(startingTrackNumber - 1) + 1;
+        }
+
+        for (int i = 0; i < unmatchedFiles.size(); i++) {
+            Path file = unmatchedFiles.get(i);
+            String filename = file.getFileName().toString();
+            int trackNumber = startingTrackNumber + i;
+
+            String trackTitle = extractTitleFromFilename(filename);
+            String trackArtist = extractArtistFromFilename(file, metadata.artist());
+
+            matchMap.put(filename, new TrackMatch(trackNumber, trackArtist, trackTitle));
+            log.info("Assigned unmatched file '{}': track {} - '{}' by '{}'",
+                    filename, trackNumber, trackTitle, trackArtist);
+        }
+    }
+
+    private String extractTitleFromFilename(String filename) {
+        String nameWithoutExt = filename.replaceAll("\\.[^.]+$", "");
+        nameWithoutExt = nameWithoutExt.replaceAll("^[A-Z]?\\d+[\\s.-]+", "");
+
+        if (nameWithoutExt.contains(" - ")) {
+            String[] parts = nameWithoutExt.split(" - ", 2);
+            if (parts.length == 2) {
+                return parts[1].trim();
+            }
+        }
+        return nameWithoutExt.trim();
+    }
+
+    private String extractArtistFromFilename(Path file, String releaseArtist) {
+        String filename = file.getFileName().toString();
+        String nameWithoutExt = filename.replaceAll("\\.[^.]+$", "");
+        nameWithoutExt = nameWithoutExt.replaceAll("^[A-Z]?\\d+[\\s.-]+", "");
+
+        if (nameWithoutExt.contains(" - ")) {
+            String[] parts = nameWithoutExt.split(" - ", 2);
+            if (parts.length == 2 && !parts[0].trim().isEmpty()) {
+                return parts[0].trim();
+            }
+        }
+
+        try {
+            var trackInfo = audioTagger.readTrackInfo(file);
+            if (trackInfo != null && trackInfo.artist() != null && !trackInfo.artist().isEmpty()) {
+                return trackInfo.artist();
+            }
+        } catch (Exception e) {
+            log.debug("Could not read artist from tags: {}", e.getMessage());
+        }
+
+        return releaseArtist;
+    }
+
+    
     public Map<String, TrackMatch> tagMatch(List<Path> audioFiles, ReleaseMetadata metadata) {
         log.info("Attempting to match {} audio files to {} tracks using existing tags.",
                 audioFiles.size(),

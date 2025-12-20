@@ -14,7 +14,6 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 @Slf4j
 @Service
@@ -61,7 +60,7 @@ public class LibraryProcessingService {
             return ProcessingResult.failure("No audio files found", errors);
         }
 
-        Map<String, TrackMatch> matchMap = matchFilesToTracks(audioFiles, metadata);
+        Map<String, TrackMatch> matchMap = trackMatcher.match(audioFiles, metadata);
         List<ProcessedFile> processedFiles = createProcessedFiles(audioFiles, matchMap, errors);
 
         if (processedFiles.isEmpty()) {
@@ -87,64 +86,6 @@ public class LibraryProcessingService {
         }
         log.info("Collected {} audio files", audioFiles.size());
         return audioFiles;
-    }
-
-    private Map<String, TrackMatch> matchFilesToTracks(List<Path> audioFiles, ReleaseMetadata metadata) {
-        return tryTagBasedMatching(audioFiles, metadata)
-                .orElseGet(() -> tryFilenameBasedMatching(audioFiles, metadata));
-    }
-
-    private Optional<Map<String, TrackMatch>> tryTagBasedMatching(List<Path> audioFiles, ReleaseMetadata metadata) {
-        Map<String, TrackMatch> matchMap = trackMatcher.tagMatch(audioFiles, metadata);
-        if (matchMap.size() == audioFiles.size()) {
-            log.info("Strategy 1 (Tags): Successfully matched all {} files.", audioFiles.size());
-            return Optional.of(matchMap);
-        }
-        log.info("Strategy 1 (Tags) failed to match all files ({} / {}).", matchMap.size(), audioFiles.size());
-        return Optional.empty();
-    }
-
-    private Map<String, TrackMatch> tryFilenameBasedMatching(List<Path> audioFiles, ReleaseMetadata metadata) {
-        log.info("Strategy 3: Falling back to filename-based matching.");
-
-        Map<String, TrackMatch> matchMap = trackMatcher.matchFromFilenames(audioFiles, metadata);
-
-        List<Path> unmatchedFiles = audioFiles.stream()
-                .filter(file -> !matchMap.containsKey(file.getFileName().toString()))
-                .toList();
-
-        if (!unmatchedFiles.isEmpty()) {
-            log.error("This should not happen: {} files still unmatched after filename matching.", unmatchedFiles.size());
-            handleUnmatchedFiles(unmatchedFiles, matchMap, metadata, audioFiles.size());
-        }
-        return matchMap;
-    }
-
-    private void handleUnmatchedFiles(List<Path> unmatchedFiles, Map<String, TrackMatch> matchMap,
-                                      ReleaseMetadata metadata, int totalFiles) {
-        boolean completeFailure = matchMap.isEmpty() && unmatchedFiles.size() == totalFiles;
-
-        if (completeFailure) {
-            log.warn("Complete matching failure: all {} files unmatched. Starting from track 1", unmatchedFiles.size());
-        } else {
-            log.info("Found {} unmatched files (bonus tracks)", unmatchedFiles.size());
-        }
-
-        int startingTrackNumber = completeFailure ? 1 :
-                (metadata.tracks() != null && !metadata.tracks().isEmpty() ? metadata.tracks().size() + 1 : 1);
-
-        for (int i = 0; i < unmatchedFiles.size(); i++) {
-            Path file = unmatchedFiles.get(i);
-            String filename = file.getFileName().toString();
-            int trackNumber = startingTrackNumber + i;
-
-            String trackTitle = extractTitleFromFilename(filename);
-            String trackArtist = extractArtistFromFilename(file, metadata.artist());
-
-            matchMap.put(filename, new TrackMatch(trackNumber, trackArtist, trackTitle));
-            log.info("Assigned unmatched file '{}': track {} - '{}' by '{}'",
-                    filename, trackNumber, trackTitle, trackArtist);
-        }
     }
 
     private List<ProcessedFile> createProcessedFiles(List<Path> audioFiles, Map<String, TrackMatch> matchMap,
