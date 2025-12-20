@@ -101,7 +101,7 @@ public class ReprocessingService {
             }
 
             try {
-                updateReleaseVersion(metadata.id(), newVersion, directoryPath, metadata, audioFiles);
+                recreateReleaseInDatabase(directoryPath, metadata, audioFiles, newVersion);
                 log.info("Updated database with new version");
             } catch (Exception ex) {
                 log.error("Failed to update database: {}", ex.getMessage());
@@ -143,17 +143,6 @@ public class ReprocessingService {
                 filename.endsWith(".wav") ||
                 filename.endsWith(".opus") ||
                 filename.endsWith(".aac");
-    }
-
-    private void updateReleaseVersion(String sourceId, int newVersion, String directoryPath,
-                                       ReleaseMetadata metadata, List<Path> audioFiles) {
-        releaseRepository.findBySourceIdWithFallback(sourceId).ifPresent(release -> {
-            log.info("Deleting existing release {} for recreation", sourceId);
-            releaseRepository.delete(release);
-            releaseRepository.flush(); // Ensure deletion is committed
-        });
-
-        recreateReleaseInDatabase(directoryPath, metadata, audioFiles, newVersion);
     }
 
     private void recreateReleaseInDatabase(String directoryPath, ReleaseMetadata metadata,

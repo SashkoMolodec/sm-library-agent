@@ -42,20 +42,16 @@ public class ReleaseService {
     ) {
         log.info("Saving release: {} by {} from source {}", metadata.title(), metadata.artist(), metadata.source());
 
-        Optional<Release> existingRelease = releaseRepository.findBySourceId(metadata.id());
-        if (existingRelease.isPresent()) {
-            log.info("Release with sourceId {} already exists, skipping", metadata.id());
-            return existingRelease.get();
-        }
+        Release release = releaseRepository.findBySourceId(metadata.id())
+                .orElseGet(Release::new);
 
-        Release release = new Release();
         release.setSourceId(metadata.id());
         release.setMasterId(metadata.masterId());
         release.setSource(metadata.source());
         release.setTitle(metadata.title());
         release.setDirectoryPath(directoryPath);
         release.setCoverPath(coverPath);
-        release.setReleaseFormat(ReleaseFormat.DIGITAL); // Default
+        release.setReleaseFormat(ReleaseFormat.DIGITAL);
         release.setLastProcessed(java.time.LocalDateTime.now());
         if (metadataVersion != null) {
             release.setMetadataVersion(metadataVersion);
