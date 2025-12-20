@@ -98,7 +98,7 @@ public class LibraryProcessingService {
             log.info("Processing file {}/{} : {}", fileIndex, audioFiles.size(), file.getFileName());
 
             try {
-                TrackMatch match = matchMap.get(file.getFileName().toString());
+                TrackMatch match = matchMap.get(file.toString());
                 if (match == null) {
                     throw new IllegalStateException("No match found for file: " + file.getFileName());
                 }

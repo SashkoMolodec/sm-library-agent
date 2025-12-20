@@ -62,7 +62,7 @@ public class TrackMatcher {
 
         for (Path file : sortedFiles) {
             TrackMatch match = matchSingleFile(file, metadata);
-            matchMap.put(file.getFileName().toString(), match);
+            matchMap.put(file.toString(), match);
 
             log.debug("Matched '{}' -> track {} - '{}'",
                     file.getFileName(), match.trackNumber(), match.trackTitle());
@@ -103,7 +103,7 @@ public class TrackMatcher {
         for (int i = 0; i < sortedFiles.size(); i++) {
             Path file = sortedFiles.get(i);
             var trackMetadata = metadata.tracks().get(i);
-            matches.put(file.getFileName().toString(),
+            matches.put(file.toString(),
                     new TrackMatch(i + 1, trackMetadata.artist(), trackMetadata.title()));
         }
         return matches;
@@ -137,7 +137,7 @@ public class TrackMatcher {
 
                 usedTrackNumbers.add(trackNum);
                 var trackMetadata = metadata.tracks().get(trackNum - 1);
-                matchMap.put(file.getFileName().toString(),
+                matchMap.put(file.toString(),
                         new TrackMatch(trackNum, trackMetadata.artist(), trackMetadata.title()));
 
             } catch (Exception ex) {
