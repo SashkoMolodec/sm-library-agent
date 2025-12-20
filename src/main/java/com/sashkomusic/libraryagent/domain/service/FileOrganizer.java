@@ -46,14 +46,18 @@ public class FileOrganizer {
             Files.createDirectories(targetDir);
             log.info("Created/verified directory: {}", targetDir);
 
-            // Copy audio files (keep originals as backup)
             List<OrganizedFile> organizedFiles = new ArrayList<>();
             for (ProcessedFile file : processedFiles) {
-                Path sourcePath = Paths.get(file.originalPath());  // Use original path, not modified
-                Path targetPath = targetDir.resolve(sourcePath.getFileName());
+                Path sourcePath = Paths.get(file.originalPath());
+
+                String tempFileName = String.format("temp_%d_%s",
+                        file.trackNumber(),
+                        sourcePath.getFileName().toString());
+
+                Path targetPath = targetDir.resolve(tempFileName);
 
                 Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
-                log.info("Copied original file: {} -> {}", sourcePath.getFileName(), targetPath);
+                log.info("Copied file to temporary location: {}", targetPath.getFileName());
 
                 organizedFiles.add(new OrganizedFile(
                         file.originalPath(),
