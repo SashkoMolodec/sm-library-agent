@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
 import java.util.*;
+
 import lombok.RequiredArgsConstructor;
 
 @Slf4j
@@ -18,104 +19,26 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class TrackMatcher {
 
-    private final AudioTagger audioTagger;
-
     public Map<String, TrackMatch> match(List<Path> audioFiles, ReleaseMetadata metadata) {
         log.info("Starting matching process for {} files", audioFiles.size());
 
-        Map<String, TrackMatch> matches = matchFromExistingTags(audioFiles, metadata);
-        if (matches.size() == audioFiles.size()) {
-            log.info("Strategy 1 (Tags): Successfully matched all files.");
+        List<Path> sortedFiles = audioFiles.stream()
+                .sorted(Comparator.comparing(Path::toString))
+                .toList();
+
+        Map<String, TrackMatch> matches = matchFromExistingTags(sortedFiles, metadata);
+        if (matches.size() == sortedFiles.size()) {
             return matches;
         }
 
-        log.info("Strategy 1 (Tags) failed or incomplete. Falling back to Strategy 2 (Filenames).");
-        
-        Map<String, TrackMatch> filenameMatches = matchFromFilenames(audioFiles, metadata);
-        
-        List<Path> unmatchedFiles = audioFiles.stream()
-                .filter(file -> !filenameMatches.containsKey(file.getFileName().toString()))
-                .toList();
-
-        if (!unmatchedFiles.isEmpty()) {
-            handleUnmatchedFiles(unmatchedFiles, filenameMatches, metadata, audioFiles.size());
+        if (metadata.tracks() != null && metadata.tracks().size() == sortedFiles.size()) {
+            log.info("File count matches track count. Applying sequential matching based on folder structure.");
+            return matchSequentially(sortedFiles, metadata);
         }
 
-        return filenameMatches;
+        return matchFromFilenames(audioFiles, metadata);
     }
 
-    private void handleUnmatchedFiles(List<Path> unmatchedFiles, Map<String, TrackMatch> matchMap,
-                                      ReleaseMetadata metadata, int totalFiles) {
-        boolean completeFailure = matchMap.isEmpty() && unmatchedFiles.size() == totalFiles;
-
-        if (completeFailure) {
-            log.warn("Complete matching failure: all {} files unmatched. Starting from track 1", unmatchedFiles.size());
-        } else {
-            log.info("Found {} unmatched files (bonus tracks)", unmatchedFiles.size());
-        }
-
-        int startingTrackNumber = (metadata.tracks() != null && !metadata.tracks().isEmpty()) 
-                ? metadata.tracks().size() + 1 : 1;
-
-        if (!matchMap.isEmpty()) {
-            startingTrackNumber = matchMap.values().stream()
-                    .mapToInt(TrackMatch::trackNumber)
-                    .max()
-                    .orElse(startingTrackNumber - 1) + 1;
-        }
-
-        for (int i = 0; i < unmatchedFiles.size(); i++) {
-            Path file = unmatchedFiles.get(i);
-            String filename = file.getFileName().toString();
-            int trackNumber = startingTrackNumber + i;
-
-            String trackTitle = extractTitleFromFilename(filename);
-            String trackArtist = extractArtistFromFilename(file, metadata.artist());
-
-            matchMap.put(filename, new TrackMatch(trackNumber, trackArtist, trackTitle));
-            log.info("Assigned unmatched file '{}': track {} - '{}' by '{}'",
-                    filename, trackNumber, trackTitle, trackArtist);
-        }
-    }
-
-    private String extractTitleFromFilename(String filename) {
-        String nameWithoutExt = filename.replaceAll("\\.[^.]+$", "");
-        nameWithoutExt = nameWithoutExt.replaceAll("^[A-Z]?\\d+[\\s.-]+", "");
-
-        if (nameWithoutExt.contains(" - ")) {
-            String[] parts = nameWithoutExt.split(" - ", 2);
-            if (parts.length == 2) {
-                return parts[1].trim();
-            }
-        }
-        return nameWithoutExt.trim();
-    }
-
-    private String extractArtistFromFilename(Path file, String releaseArtist) {
-        String filename = file.getFileName().toString();
-        String nameWithoutExt = filename.replaceAll("\\.[^.]+$", "");
-        nameWithoutExt = nameWithoutExt.replaceAll("^[A-Z]?\\d+[\\s.-]+", "");
-
-        if (nameWithoutExt.contains(" - ")) {
-            String[] parts = nameWithoutExt.split(" - ", 2);
-            if (parts.length == 2 && !parts[0].trim().isEmpty()) {
-                return parts[0].trim();
-            }
-        }
-
-        try {
-            var trackInfo = audioTagger.readTrackInfo(file);
-            if (trackInfo != null && trackInfo.artist() != null && !trackInfo.artist().isEmpty()) {
-                return trackInfo.artist();
-            }
-        } catch (Exception e) {
-            log.debug("Could not read artist from tags: {}", e.getMessage());
-        }
-
-        return releaseArtist;
-    }
-
-    
     public Map<String, TrackMatch> tagMatch(List<Path> audioFiles, ReleaseMetadata metadata) {
         log.info("Attempting to match {} audio files to {} tracks using existing tags.",
                 audioFiles.size(),
@@ -175,67 +98,54 @@ public class TrackMatcher {
         return new TrackMatch(nextTrackNumber, metadata.artist(), title);
     }
 
+    private Map<String, TrackMatch> matchSequentially(List<Path> sortedFiles, ReleaseMetadata metadata) {
+        Map<String, TrackMatch> matches = new HashMap<>();
+        for (int i = 0; i < sortedFiles.size(); i++) {
+            Path file = sortedFiles.get(i);
+            var trackMetadata = metadata.tracks().get(i);
+            matches.put(file.getFileName().toString(),
+                    new TrackMatch(i + 1, trackMetadata.artist(), trackMetadata.title()));
+        }
+        return matches;
+    }
+
     public Map<String, TrackMatch> matchFromExistingTags(List<Path> audioFiles, ReleaseMetadata metadata) {
         if (metadata.tracks() == null || metadata.tracks().isEmpty()) {
             return Map.of();
         }
 
         Map<String, TrackMatch> matchMap = new HashMap<>();
-        Map<Integer, String> trackNumberUsage = new HashMap<>();
+        Set<Integer> usedTrackNumbers = new HashSet<>();
 
         for (Path file : audioFiles) {
             try {
+                String currentDir = file.getParent().getFileName().toString();
+
                 AudioFile audioFile = AudioFileIO.read(file.toFile());
                 Tag tag = audioFile.getTag();
-                if (tag == null) {
-                    continue;
-                }
+                if (tag == null) return Map.of();
 
-                String trackNumberStr = tag.getFirst(FieldKey.TRACK);
-                if (trackNumberStr == null || trackNumberStr.isEmpty()) {
-                    continue;
-                }
+                String trackStr = tag.getFirst(FieldKey.TRACK);
+                int trackNum = parseTrackNumberFromTag(trackStr);
 
-                int trackNumber = parseTrackNumberFromTag(trackNumberStr);
-                if (trackNumber <= 0 || trackNumber > metadata.tracks().size()) {
-                    log.debug("Track number {} from '{}' out of range, skipping tags",
-                            trackNumber, file.getFileName());
+                if (usedTrackNumbers.contains(trackNum)) {
+                    log.warn("Duplicate track number {} detected in tags (folder: {}). Tag matching is unreliable.", trackNum, currentDir);
                     return Map.of();
                 }
 
-                // Detect duplicates
-                if (trackNumberUsage.containsKey(trackNumber)) {
-                    log.warn("Duplicate track number {} in tags ('{}' and '{}'), tags invalid",
-                            trackNumber, trackNumberUsage.get(trackNumber), file.getFileName());
-                    return Map.of();
-                }
+                if (trackNum <= 0 || trackNum > metadata.tracks().size()) return Map.of();
 
-                trackNumberUsage.put(trackNumber, file.getFileName().toString());
-
-                var trackMetadata = metadata.tracks().get(trackNumber - 1);
+                usedTrackNumbers.add(trackNum);
+                var trackMetadata = metadata.tracks().get(trackNum - 1);
                 matchMap.put(file.getFileName().toString(),
-                        new TrackMatch(trackNumber, trackMetadata.artist(), trackMetadata.title()));
+                        new TrackMatch(trackNum, trackMetadata.artist(), trackMetadata.title()));
 
             } catch (Exception ex) {
-                log.debug("Could not read tags from '{}': {}", file.getFileName(), ex.getMessage());
-            }
-        }
-
-        // Validate completeness - all files must have tags
-        if (matchMap.size() != audioFiles.size()) {
-            log.debug("Only {}/{} files have valid tags, incomplete", matchMap.size(), audioFiles.size());
-            return Map.of();
-        }
-
-        // Validate sequential - no gaps in track numbers
-        for (int i = 1; i <= audioFiles.size(); i++) {
-            if (!trackNumberUsage.containsKey(i)) {
-                log.warn("Missing track number {} in tags, sequence invalid", i);
                 return Map.of();
             }
         }
 
-        return matchMap;
+        return matchMap.size() == audioFiles.size() ? matchMap : Map.of();
     }
 
     private Integer extractTrackNumber(String filename, ReleaseMetadata metadata) {

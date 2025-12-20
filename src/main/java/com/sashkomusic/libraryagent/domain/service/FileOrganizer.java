@@ -6,20 +6,21 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Slf4j
 @Service
 public class FileOrganizer {
 
     private static final int MAX_FOLDER_NAME_LENGTH = 200;
+    private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss");
 
     public OrganizationResult organize(
             ReleaseMetadata metadata,
@@ -40,7 +41,8 @@ public class FileOrganizer {
                     .resolve(artistFolder)
                     .resolve(albumFolder);
 
-            // Create directories if they don't exist
+            handleExistingTargetDirectory(targetDir);
+
             Files.createDirectories(targetDir);
             log.info("Created/verified directory: {}", targetDir);
 
@@ -81,6 +83,30 @@ public class FileOrganizer {
         } catch (IOException e) {
             log.error("Failed to organize files: {}", e.getMessage(), e);
             throw new FileOrganizationException("Failed to organize files into library structure", e);
+        }
+    }
+
+    private void handleExistingTargetDirectory(Path targetDir) throws IOException {
+        if (Files.exists(targetDir) && Files.isDirectory(targetDir)) {
+            try (Stream<Path> entries = Files.list(targetDir)) {
+                List<Path> contents = entries.toList();
+                
+                if (!contents.isEmpty()) {
+                    log.warn("Target directory is not empty: {}. Moving existing files to 'old' folder.", targetDir);
+                    
+                    String timestamp = LocalDateTime.now().format(TIMESTAMP_FORMAT);
+                    Path oldFolder = targetDir.resolve("old_" + timestamp);
+                    Files.createDirectories(oldFolder);
+                    
+                    for (Path item : contents) {
+                        if (!item.getFileName().toString().startsWith("old_")) {
+                            Path target = oldFolder.resolve(item.getFileName());
+                            Files.move(item, target, StandardCopyOption.REPLACE_EXISTING);
+                        }
+                    }
+                    log.info("Successfully moved {} items to {}", contents.size(), oldFolder.getFileName());
+                }
+            }
         }
     }
 
