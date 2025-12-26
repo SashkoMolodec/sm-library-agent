@@ -7,7 +7,12 @@ import org.jaudiotagger.tag.FieldKey;
 import org.jaudiotagger.tag.Tag;
 import org.jaudiotagger.tag.id3.AbstractID3v2Frame;
 import org.jaudiotagger.tag.id3.AbstractID3v2Tag;
+import org.jaudiotagger.tag.id3.ID3v24Frames;
 import org.jaudiotagger.tag.id3.framebody.FrameBodyTXXX;
+import org.jaudiotagger.tag.id3.ID3v24Frame;
+import org.jaudiotagger.tag.flac.FlacTag;
+import org.jaudiotagger.tag.vorbiscomment.VorbisCommentTag;
+import org.jaudiotagger.tag.vorbiscomment.VorbisCommentTagField;
 import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
@@ -120,33 +125,26 @@ public class AudioTagExtractor {
         }
     }
 
-    /**
-     * Extracts rating, preferring "RATING WMP" (Traktor/WMP format with values 0, 51, 102, 153, 204, 255)
-     * Falls back to standard RATING field if RATING WMP is not present.
-     * Used for FLAC and M4A files where both tags may exist.
-     */
     private void extractRating(Tag tag, Map<String, String> tags) {
-        String rating = null;
         try {
-            rating = tag.getFirst("RATING WMP");
+            String rating = tag.getFirst(FieldKey.RATING);
+            if (rating != null && !rating.isEmpty()) {
+                tags.put("RATING", rating);
+            }
+        } catch (Exception e) {
+            log.trace("Failed to extract RATING: {}", e.getMessage());
+        }
+
+        try {
+            String ratingWmp = tag.getFirst("RATING WMP");
+            if (ratingWmp != null && !ratingWmp.isEmpty()) {
+                tags.put("RATING WMP", ratingWmp);
+            }
         } catch (Exception e) {
             log.trace("Failed to extract RATING WMP: {}", e.getMessage());
         }
-
-        if (rating == null || rating.isEmpty()) {
-            rating = tag.getFirst(FieldKey.RATING);
-        }
-
-        if (rating != null && !rating.isEmpty()) {
-            tags.put("RATING", rating);
-        }
     }
 
-    /**
-     * Extracts label/publisher tag.
-     * For FLAC: tries ORGANIZATION first (Traktor-compatible)
-     * Falls back to RECORD_LABEL (MP3 TPUB frame)
-     */
     private void extractLabel(Tag tag, Map<String, String> tags) {
         String label = null;
         try {
@@ -176,7 +174,7 @@ public class AudioTagExtractor {
     }
 
     /**
-     * Writes rating to audio file in Traktor-compatible format (RATING WMP)
+     * Writes rating to audio file in both RATING and RATING WMP formats
      * @param audioFile Path to audio file
      * @param rating Rating value (1-5 stars)
      * @return true if successful
@@ -193,12 +191,68 @@ public class AudioTagExtractor {
 
             // Convert stars to Traktor WMP format: 1→51, 2→102, 3→153, 4→204, 5→255
             int ratingWmp = convertStarsToWmpRating(rating);
+            String ratingWmpStr = String.valueOf(ratingWmp);
 
-            // Set standard RATING field
-            tag.setField(FieldKey.RATING, String.valueOf(ratingWmp));
+            // Set standard RATING field (for Navidrome)
+            tag.setField(FieldKey.RATING, ratingWmpStr);
+
+            // Set RATING WMP field (Traktor-compatible)
+            if (tag instanceof FlacTag || tag instanceof VorbisCommentTag) {
+                // For FLAC/OGG files - use Vorbis Comment
+                try {
+                    // Create custom RATING WMP field
+                    VorbisCommentTagField ratingWmpField = new VorbisCommentTagField("RATING WMP", ratingWmpStr);
+
+                    // For FlacTag and VorbisCommentTag, setField should work
+                    tag.setField(ratingWmpField);
+                    log.info("Set RATING WMP Vorbis comment to: {}", ratingWmpStr);
+                } catch (Exception e) {
+                    log.error("Could not set RATING WMP Vorbis comment: {}", e.getMessage(), e);
+                }
+            } else if (tag instanceof AbstractID3v2Tag) {
+                // For MP3 files - use TXXX frame
+                try {
+                    AbstractID3v2Tag id3Tag = (AbstractID3v2Tag) tag;
+
+                    // Remove existing RATING WMP TXXX frame if present
+                    var fields = id3Tag.getFields("TXXX");
+                    for (var field : fields) {
+                        if (field instanceof AbstractID3v2Frame) {
+                            AbstractID3v2Frame id3Frame = (AbstractID3v2Frame) field;
+                            if (id3Frame.getBody() instanceof FrameBodyTXXX) {
+                                FrameBodyTXXX body = (FrameBodyTXXX) id3Frame.getBody();
+                                if ("RATING WMP".equalsIgnoreCase(body.getDescription())) {
+                                    try {
+                                        id3Tag.deleteField(field.getId());
+                                        log.trace("Removed old RATING WMP TXXX frame");
+                                    } catch (Exception e) {
+                                        log.trace("Failed to remove old RATING WMP frame: {}", e.getMessage());
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // Create new TXXX frame for RATING WMP
+                    FrameBodyTXXX frameBody = new FrameBodyTXXX();
+                    frameBody.setDescription("RATING WMP");
+                    frameBody.setText(ratingWmpStr);
+
+                    ID3v24Frame frame = new ID3v24Frame(ID3v24Frames.FRAME_ID_USER_DEFINED_INFO);
+                    frame.setBody(frameBody);
+
+                    id3Tag.addField(frame);
+                    log.trace("Added RATING WMP TXXX frame with value: {}", ratingWmpStr);
+                } catch (Exception e) {
+                    log.warn("Could not set RATING WMP TXXX frame: {}", e.getMessage());
+                }
+            } else {
+                log.debug("Unknown tag type {}, only RATING field will be set", tag.getClass().getName());
+            }
 
             audio.commit();
-            log.info("Wrote rating {} (WMP: {}) to: {}", rating, ratingWmp, audioFile.getFileName());
+            log.info("Wrote rating {} (WMP: {}) to RATING and RATING WMP: {}", rating, ratingWmp, audioFile.getFileName());
             return true;
 
         } catch (Exception e) {

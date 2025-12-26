@@ -43,10 +43,11 @@ public class RateTrackService {
             return new RateResult(false, "файл не існує");
         }
 
-        // Convert to WMP format for DB
         int ratingWmp = convertStarsToWmpRating(rating);
+        String ratingWmpStr = String.valueOf(ratingWmp);
 
-        track.setTag("RATING", String.valueOf(ratingWmp));
+        track.setTag("RATING", ratingWmpStr);
+        track.setTag("RATING WMP", ratingWmpStr);
         trackRepository.save(track);
 
         boolean fileSuccess = audioTagExtractor.writeRating(audioFile, rating);
