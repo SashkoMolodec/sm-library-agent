@@ -1,8 +1,9 @@
 package com.sashkomusic.libraryagent.domain.service;
 
-import com.sashkomusic.libraryagent.domain.entity.Track;
+import com.sashkomusic.libraryagent.domain.entity.*;
 import com.sashkomusic.libraryagent.domain.model.TagChange;
 import com.sashkomusic.libraryagent.domain.model.TrackTagChanges;
+import com.sashkomusic.libraryagent.domain.repository.LabelRepository;
 import com.sashkomusic.libraryagent.domain.repository.TrackRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,6 +28,7 @@ public class TrackTagSyncService {
     private final TrackRepository trackRepository;
     private final AudioTagExtractor tagExtractor;
     private final TagChangeBatchCollector batchCollector;
+    private final LabelRepository labelRepository;
 
     @Value("${sync.enabled:true}")
     private boolean syncEnabled;
@@ -37,11 +39,13 @@ public class TrackTagSyncService {
     public TrackTagSyncService(
             TrackRepository trackRepository,
             AudioTagExtractor tagExtractor,
-            TagChangeBatchCollector batchCollector
+            TagChangeBatchCollector batchCollector,
+            LabelRepository labelRepository
     ) {
         this.trackRepository = trackRepository;
         this.tagExtractor = tagExtractor;
         this.batchCollector = batchCollector;
+        this.labelRepository = labelRepository;
     }
 
     @Scheduled(fixedDelayString = "${sync.interval:300000}")
@@ -144,7 +148,7 @@ public class TrackTagSyncService {
     private TrackTagChanges mergeTagsAndCollectChanges(Track track, Map<String, String> fileTags) {
         String artistName = track.getArtists().stream()
                 .findFirst()
-                .map(artist -> artist.getName())
+                .map(Artist::getName)
                 .orElse("невідомий виконавець");
 
         TrackTagChanges trackChanges = new TrackTagChanges(
@@ -163,6 +167,15 @@ public class TrackTagSyncService {
                 trackChanges.addChange(new TagChange(tagName, currentValue, newValue));
                 track.setTag(tagName, newValue);
 
+                if (isTitleTag(tagName) && newValue != null && !newValue.isEmpty()) {
+                    log.info("Updating track title from '{}' to '{}'", track.getTitle(), newValue);
+                    track.setTitle(newValue);
+                }
+
+                if (isPublisherTag(tagName) && newValue != null && !newValue.isEmpty()) {
+                    updateReleaseLabel(track, newValue);
+                }
+
                 log.trace("Updated tag {} for track {}: '{}' -> '{}'",
                         tagName, track.getTitle(), currentValue, newValue);
             }
@@ -171,18 +184,49 @@ public class TrackTagSyncService {
         return trackChanges;
     }
 
+    private boolean isTitleTag(String tagName) {
+        String upperTag = tagName.toUpperCase();
+        return "TIT2".equals(upperTag) || "TITLE".equals(upperTag);
+    }
+
+    private boolean isPublisherTag(String tagName) {
+        String upperTag = tagName.toUpperCase();
+        return "PUBLISHER".equals(upperTag) || "TPUB".equals(upperTag);
+    }
+
+    private void updateReleaseLabel(Track track, String labelName) {
+        Release release = track.getRelease();
+        if (release == null) {
+            log.warn("Cannot update label - track {} has no release", track.getTitle());
+            return;
+        }
+
+        if (release.getLabel() != null && release.getLabel().getName().equalsIgnoreCase(labelName)) {
+            log.trace("Label already set to '{}' for release '{}'", labelName, release.getTitle());
+            return;
+        }
+
+        Label label = labelRepository.findByName(labelName).orElse(null);
+
+        if (label == null) {
+            log.info("Creating new label: '{}'", labelName);
+            label = new Label(labelName);
+            label = labelRepository.save(label);
+        }
+
+        String oldLabelName = release.getLabel() != null ? release.getLabel().getName() : "null";
+        release.setLabel(label);
+        log.info("Updated label for release '{}': '{}' -> '{}'", release.getTitle(), oldLabelName, labelName);
+    }
+
     private LocalDateTime getLastSyncTime(Track track) {
         return track.getTags().stream()
-                .map(tag -> tag.getLastSyncedAt())
+                .map(TrackTag::getLastSyncedAt)
                 .filter(Objects::nonNull)
                 .max(LocalDateTime::compareTo)
                 .orElse(null);
     }
 
-    /**
-     * Sync tags for a single track by file path
-     * Used by file watcher for immediate sync when file changes
-     */
     @Transactional
     public boolean syncTrackByPath(Path filePath) {
         try {
