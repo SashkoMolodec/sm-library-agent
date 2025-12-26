@@ -174,4 +174,48 @@ public class AudioTagExtractor {
 
         return filteredTags;
     }
+
+    /**
+     * Writes rating to audio file in Traktor-compatible format (RATING WMP)
+     * @param audioFile Path to audio file
+     * @param rating Rating value (1-5 stars)
+     * @return true if successful
+     */
+    public boolean writeRating(Path audioFile, int rating) {
+        if (rating < 0 || rating > 5) {
+            log.error("Invalid rating: {}. Must be 0-5", rating);
+            return false;
+        }
+
+        try {
+            AudioFile audio = AudioFileIO.read(audioFile.toFile());
+            Tag tag = audio.getTagOrCreateAndSetDefault();
+
+            // Convert stars to Traktor WMP format: 1→51, 2→102, 3→153, 4→204, 5→255
+            int ratingWmp = convertStarsToWmpRating(rating);
+
+            // Set standard RATING field
+            tag.setField(FieldKey.RATING, String.valueOf(ratingWmp));
+
+            audio.commit();
+            log.info("Wrote rating {} (WMP: {}) to: {}", rating, ratingWmp, audioFile.getFileName());
+            return true;
+
+        } catch (Exception e) {
+            log.error("Failed to write rating to {}: {}", audioFile, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    private int convertStarsToWmpRating(int stars) {
+        return switch (stars) {
+            case 0 -> 0;
+            case 1 -> 51;
+            case 2 -> 102;
+            case 3 -> 153;
+            case 4 -> 204;
+            case 5 -> 255;
+            default -> throw new IllegalArgumentException("Invalid rating: " + stars);
+        };
+    }
 }
