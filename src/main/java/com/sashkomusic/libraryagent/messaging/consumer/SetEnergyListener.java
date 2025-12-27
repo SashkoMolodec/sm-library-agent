@@ -1,7 +1,7 @@
 package com.sashkomusic.libraryagent.messaging.consumer;
 
 import com.sashkomusic.libraryagent.domain.service.RateTrackService;
-import com.sashkomusic.libraryagent.messaging.consumer.dto.RateTrackTaskDto;
+import com.sashkomusic.libraryagent.messaging.consumer.dto.SetEnergyTaskDto;
 import com.sashkomusic.libraryagent.messaging.producer.TrackUpdateResultProducer;
 import com.sashkomusic.libraryagent.messaging.producer.dto.TrackUpdateResultDto;
 import lombok.RequiredArgsConstructor;
@@ -12,23 +12,23 @@ import org.springframework.stereotype.Component;
 @Component
 @Slf4j
 @RequiredArgsConstructor
-public class RateTrackListener {
+public class SetEnergyListener {
 
     private final RateTrackService rateTrackService;
     private final TrackUpdateResultProducer resultProducer;
 
-    @KafkaListener(topics = "rate-track-tasks", groupId = "library-agent-group")
-    public void handleRateTrack(RateTrackTaskDto task) {
-        log.info("Received rate track task: trackId={}, rating={}, chatId={}",
-                task.trackId(), task.rating(), task.chatId());
+    @KafkaListener(topics = "set-energy-tasks", groupId = "library-agent-group")
+    public void handleSetEnergy(SetEnergyTaskDto task) {
+        log.info("Received set energy task: trackId={}, energy={}, chatId={}",
+                task.trackId(), task.energy(), task.chatId());
 
         try {
-            RateTrackService.RateResult result = rateTrackService.rateTrack(task.trackId(), task.rating());
+            RateTrackService.RateResult result = rateTrackService.setEnergy(task.trackId(), task.energy());
 
             TrackUpdateResultDto resultDto = new TrackUpdateResultDto(
                     task.trackId(),
-                    "rating",
-                    String.valueOf(task.rating()),
+                    "energy",
+                    task.energy(),
                     result.success(),
                     result.message(),
                     task.chatId()
@@ -37,12 +37,12 @@ public class RateTrackListener {
             resultProducer.send(resultDto);
 
         } catch (Exception ex) {
-            log.error("Error rating track: {}", ex.getMessage(), ex);
+            log.error("Error setting energy: {}", ex.getMessage(), ex);
 
             TrackUpdateResultDto errorDto = new TrackUpdateResultDto(
                     task.trackId(),
-                    "rating",
-                    String.valueOf(task.rating()),
+                    "energy",
+                    task.energy(),
                     false,
                     "критична помилка: " + ex.getMessage(),
                     task.chatId()

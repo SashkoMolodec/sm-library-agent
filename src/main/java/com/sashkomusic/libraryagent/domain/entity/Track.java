@@ -75,6 +75,22 @@ public class Track {
         tag.setLastSyncedAt(java.time.LocalDateTime.now());
     }
 
+    public void prependToTag(String tagName, String newValue) {
+        TrackTag tag = tags.stream()
+                .filter(t -> t.getTagName().equals(tagName))
+                .findFirst()
+                .orElse(null);
+
+        if (tag == null) {
+            setTag(tagName, newValue);
+        } else {
+            String existingValue = tag.getTagValue();
+            String combined = newValue + "; " + existingValue;
+            tag.setTagValue(combined);
+            tag.setLastSyncedAt(java.time.LocalDateTime.now());
+        }
+    }
+
     public java.util.Optional<String> getTag(String tagName) {
         return tags.stream()
                 .filter(t -> t.getTagName().equals(tagName))

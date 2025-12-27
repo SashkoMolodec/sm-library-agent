@@ -1,7 +1,7 @@
 package com.sashkomusic.libraryagent.messaging.consumer;
 
 import com.sashkomusic.libraryagent.domain.service.RateTrackService;
-import com.sashkomusic.libraryagent.messaging.consumer.dto.RateTrackTaskDto;
+import com.sashkomusic.libraryagent.messaging.consumer.dto.AddCommentTaskDto;
 import com.sashkomusic.libraryagent.messaging.producer.TrackUpdateResultProducer;
 import com.sashkomusic.libraryagent.messaging.producer.dto.TrackUpdateResultDto;
 import lombok.RequiredArgsConstructor;
@@ -12,23 +12,23 @@ import org.springframework.stereotype.Component;
 @Component
 @Slf4j
 @RequiredArgsConstructor
-public class RateTrackListener {
+public class AddCommentListener {
 
     private final RateTrackService rateTrackService;
     private final TrackUpdateResultProducer resultProducer;
 
-    @KafkaListener(topics = "rate-track-tasks", groupId = "library-agent-group")
-    public void handleRateTrack(RateTrackTaskDto task) {
-        log.info("Received rate track task: trackId={}, rating={}, chatId={}",
-                task.trackId(), task.rating(), task.chatId());
+    @KafkaListener(topics = "add-comment-tasks", groupId = "library-agent-group")
+    public void handleAddComment(AddCommentTaskDto task) {
+        log.info("Received add comment task: trackId={}, chatId={}",
+                task.trackId(), task.chatId());
 
         try {
-            RateTrackService.RateResult result = rateTrackService.rateTrack(task.trackId(), task.rating());
+            RateTrackService.RateResult result = rateTrackService.addComment(task.trackId(), task.comment());
 
             TrackUpdateResultDto resultDto = new TrackUpdateResultDto(
                     task.trackId(),
-                    "rating",
-                    String.valueOf(task.rating()),
+                    "comment",
+                    task.comment(),
                     result.success(),
                     result.message(),
                     task.chatId()
@@ -37,12 +37,12 @@ public class RateTrackListener {
             resultProducer.send(resultDto);
 
         } catch (Exception ex) {
-            log.error("Error rating track: {}", ex.getMessage(), ex);
+            log.error("Error adding comment: {}", ex.getMessage(), ex);
 
             TrackUpdateResultDto errorDto = new TrackUpdateResultDto(
                     task.trackId(),
-                    "rating",
-                    String.valueOf(task.rating()),
+                    "comment",
+                    task.comment(),
                     false,
                     "критична помилка: " + ex.getMessage(),
                     task.chatId()

@@ -1,7 +1,7 @@
 package com.sashkomusic.libraryagent.messaging.consumer;
 
 import com.sashkomusic.libraryagent.domain.service.RateTrackService;
-import com.sashkomusic.libraryagent.messaging.consumer.dto.RateTrackTaskDto;
+import com.sashkomusic.libraryagent.messaging.consumer.dto.SetFunctionTaskDto;
 import com.sashkomusic.libraryagent.messaging.producer.TrackUpdateResultProducer;
 import com.sashkomusic.libraryagent.messaging.producer.dto.TrackUpdateResultDto;
 import lombok.RequiredArgsConstructor;
@@ -12,23 +12,23 @@ import org.springframework.stereotype.Component;
 @Component
 @Slf4j
 @RequiredArgsConstructor
-public class RateTrackListener {
+public class SetFunctionListener {
 
     private final RateTrackService rateTrackService;
     private final TrackUpdateResultProducer resultProducer;
 
-    @KafkaListener(topics = "rate-track-tasks", groupId = "library-agent-group")
-    public void handleRateTrack(RateTrackTaskDto task) {
-        log.info("Received rate track task: trackId={}, rating={}, chatId={}",
-                task.trackId(), task.rating(), task.chatId());
+    @KafkaListener(topics = "set-function-tasks", groupId = "library-agent-group")
+    public void handleSetFunction(SetFunctionTaskDto task) {
+        log.info("Received set function task: trackId={}, function={}, chatId={}",
+                task.trackId(), task.function(), task.chatId());
 
         try {
-            RateTrackService.RateResult result = rateTrackService.rateTrack(task.trackId(), task.rating());
+            RateTrackService.RateResult result = rateTrackService.setFunction(task.trackId(), task.function());
 
             TrackUpdateResultDto resultDto = new TrackUpdateResultDto(
                     task.trackId(),
-                    "rating",
-                    String.valueOf(task.rating()),
+                    "function",
+                    task.function(),
                     result.success(),
                     result.message(),
                     task.chatId()
@@ -37,12 +37,12 @@ public class RateTrackListener {
             resultProducer.send(resultDto);
 
         } catch (Exception ex) {
-            log.error("Error rating track: {}", ex.getMessage(), ex);
+            log.error("Error setting function: {}", ex.getMessage(), ex);
 
             TrackUpdateResultDto errorDto = new TrackUpdateResultDto(
                     task.trackId(),
-                    "rating",
-                    String.valueOf(task.rating()),
+                    "function",
+                    task.function(),
                     false,
                     "критична помилка: " + ex.getMessage(),
                     task.chatId()
