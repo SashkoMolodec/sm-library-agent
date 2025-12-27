@@ -167,6 +167,11 @@ public class TrackTagSyncService {
                 trackChanges.addChange(new TagChange(tagName, currentValue, newValue));
                 track.setTag(tagName, newValue);
 
+                // Sync RATING and RATING WMP tags
+                if (isRatingTag(tagName) && newValue != null && !newValue.isEmpty()) {
+                    syncRatingTags(track, tagName, newValue, trackChanges);
+                }
+
                 if (isTitleTag(tagName) && newValue != null && !newValue.isEmpty()) {
                     log.info("Updating track title from '{}' to '{}'", track.getTitle(), newValue);
                     track.setTitle(newValue);
@@ -182,6 +187,24 @@ public class TrackTagSyncService {
         }
 
         return trackChanges;
+    }
+
+    private boolean isRatingTag(String tagName) {
+        String upperTag = tagName.toUpperCase();
+        return "RATING".equals(upperTag) || "RATING WMP".equals(upperTag);
+    }
+
+    private void syncRatingTags(Track track, String changedTag, String newValue, TrackTagChanges trackChanges) {
+        String upperTag = changedTag.toUpperCase();
+        String otherTagName = "RATING".equals(upperTag) ? "RATING WMP" : "RATING";
+
+        String currentOtherValue = track.getTag(otherTagName).orElse(null);
+
+        if (!Objects.equals(currentOtherValue, newValue)) {
+            trackChanges.addChange(new TagChange(otherTagName, currentOtherValue, newValue));
+            track.setTag(otherTagName, newValue);
+            log.debug("Synced {} to match {}: '{}'", otherTagName, changedTag, newValue);
+        }
     }
 
     private boolean isTitleTag(String tagName) {
