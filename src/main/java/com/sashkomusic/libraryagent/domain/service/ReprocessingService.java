@@ -126,6 +126,7 @@ public class ReprocessingService {
         try (var files = Files.list(directory)) {
             files.filter(Files::isRegularFile)
                     .filter(this::isAudioFile)
+                    .filter(this::isNotHiddenMacFile)
                     .forEach(audioFiles::add);
         } catch (Exception ex) {
             log.error("Failed to list files in {}: {}", directory, ex.getMessage());
@@ -143,6 +144,11 @@ public class ReprocessingService {
                 filename.endsWith(".wav") ||
                 filename.endsWith(".opus") ||
                 filename.endsWith(".aac");
+    }
+
+    private boolean isNotHiddenMacFile(Path file) {
+        String filename = file.getFileName().toString();
+        return !filename.startsWith("._");
     }
 
     private void recreateReleaseInDatabase(String directoryPath, ReleaseMetadata metadata,
