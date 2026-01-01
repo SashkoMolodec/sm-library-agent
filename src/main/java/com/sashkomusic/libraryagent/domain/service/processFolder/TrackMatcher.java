@@ -95,7 +95,7 @@ public class TrackMatcher {
 
     public Map<String, TrackMatch> matchFromExistingTags(List<Path> audioFiles, ReleaseMetadata metadata) {
         if (metadata.tracks() == null || metadata.tracks().isEmpty()) {
-            return Map.of();
+            return new HashMap<>();
         }
 
         Map<String, TrackMatch> matchMap = new HashMap<>();
@@ -117,7 +117,7 @@ public class TrackMatcher {
 
                 if (usedTrackNumbers.contains(trackNum)) {
                     log.warn("Duplicate track number {} detected in tags (folder: {}). Skipping tag matching entirely.", trackNum, currentDir);
-                    return Map.of();
+                    return new HashMap<>();
                 }
 
                 if (trackNum <= 0 || trackNum > metadata.tracks().size()) {
