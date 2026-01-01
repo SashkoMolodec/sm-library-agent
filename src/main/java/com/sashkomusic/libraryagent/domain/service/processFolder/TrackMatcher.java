@@ -28,49 +28,36 @@ public class TrackMatcher {
 
         Map<String, TrackMatch> matches = matchFromExistingTags(sortedFiles, metadata);
         if (matches.size() == sortedFiles.size()) {
+            log.info("All {} files matched by tags", matches.size());
             return matches;
         }
 
-        if (metadata.tracks() != null && metadata.tracks().size() == sortedFiles.size()) {
-            log.info("File count matches track count. Applying sequential matching based on folder structure.");
-            return matchSequentially(sortedFiles, metadata);
+        List<Path> unmatchedFiles = sortedFiles.stream()
+                .filter(file -> !matches.containsKey(file.toString()))
+                .toList();
+
+        if (!unmatchedFiles.isEmpty()) {
+            log.info("Matched {} files by tags, {} files need filename matching",
+                    matches.size(), unmatchedFiles.size());
+
+            // Get next available track number
+            int nextTrackNum = matches.values().stream()
+                    .mapToInt(TrackMatch::trackNumber)
+                    .max()
+                    .orElse(0) + 1;
+
+            // Match remaining files by filename
+            for (Path file : unmatchedFiles) {
+                TrackMatch match = matchSingleFile(file, metadata, nextTrackNum);
+                matches.put(file.toString(), match);
+                nextTrackNum = Math.max(nextTrackNum, match.trackNumber()) + 1;
+            }
         }
 
-        return matchFromFilenames(audioFiles, metadata);
+        return matches;
     }
 
-    public Map<String, TrackMatch> tagMatch(List<Path> audioFiles, ReleaseMetadata metadata) {
-        log.info("Attempting to match {} audio files to {} tracks using existing tags.",
-                audioFiles.size(),
-                metadata.tracks() != null ? metadata.tracks().size() : 0);
-
-        Map<String, TrackMatch> tagBasedMatches = matchFromExistingTags(audioFiles, metadata);
-        if (tagBasedMatches.size() == audioFiles.size()) {
-            log.info("Successfully matched all files using existing tags.");
-            return tagBasedMatches;
-        }
-
-        log.info("Tag-based matching was incomplete (matched {} / {}).", tagBasedMatches.size(), audioFiles.size());
-        return Map.of();
-    }
-
-    public Map<String, TrackMatch> matchFromFilenames(List<Path> audioFiles, ReleaseMetadata metadata) {
-        List<Path> sortedFiles = new ArrayList<>(audioFiles);
-        sortedFiles.sort(Comparator.comparing(p -> p.getFileName().toString()));
-
-        Map<String, TrackMatch> matchMap = new HashMap<>();
-
-        for (Path file : sortedFiles) {
-            TrackMatch match = matchSingleFile(file, metadata);
-            matchMap.put(file.toString(), match);
-
-            log.debug("Matched '{}' -> track {} - '{}'",
-                    file.getFileName(), match.trackNumber(), match.trackTitle());
-        }
-        return matchMap;
-    }
-
-    private TrackMatch matchSingleFile(Path file, ReleaseMetadata metadata) {
+    private TrackMatch matchSingleFile(Path file, ReleaseMetadata metadata, int fallbackTrackNum) {
         String filename = file.getFileName().toString();
         Integer trackNumber = extractTrackNumber(filename, metadata);
 
@@ -89,13 +76,10 @@ public class TrackMatcher {
             return new TrackMatch(trackNumber, metadata.artist(), title);
         }
 
-        // Case 3: No track number in filename - assign next available number
-        int nextTrackNumber = metadata.tracks() != null && !metadata.tracks().isEmpty()
-                ? metadata.tracks().size() + 1
-                : 1;
+        // Case 3: No track number in filename - use provided fallback number
         String title = extractTitle(filename);
-        log.warn("No track number found in '{}', assigning track {}", filename, nextTrackNumber);
-        return new TrackMatch(nextTrackNumber, metadata.artist(), title);
+        log.warn("No track number found in '{}', assigning track {}", filename, fallbackTrackNum);
+        return new TrackMatch(fallbackTrackNum, metadata.artist(), title);
     }
 
     private Map<String, TrackMatch> matchSequentially(List<Path> sortedFiles, ReleaseMetadata metadata) {
@@ -123,17 +107,24 @@ public class TrackMatcher {
 
                 AudioFile audioFile = AudioFileIO.read(file.toFile());
                 Tag tag = audioFile.getTag();
-                if (tag == null) return Map.of();
+                if (tag == null) {
+                    log.debug("File '{}' has no tags, skipping", file.getFileName());
+                    continue;
+                }
 
                 String trackStr = tag.getFirst(FieldKey.TRACK);
                 int trackNum = parseTrackNumberFromTag(trackStr);
 
                 if (usedTrackNumbers.contains(trackNum)) {
-                    log.warn("Duplicate track number {} detected in tags (folder: {}). Tag matching is unreliable.", trackNum, currentDir);
+                    log.warn("Duplicate track number {} detected in tags (folder: {}). Skipping tag matching entirely.", trackNum, currentDir);
                     return Map.of();
                 }
 
-                if (trackNum <= 0 || trackNum > metadata.tracks().size()) return Map.of();
+                if (trackNum <= 0 || trackNum > metadata.tracks().size()) {
+                    log.debug("File '{}' has track number {} which is outside metadata range (1-{}), skipping",
+                            file.getFileName(), trackNum, metadata.tracks().size());
+                    continue;
+                }
 
                 usedTrackNumbers.add(trackNum);
                 var trackMetadata = metadata.tracks().get(trackNum - 1);
@@ -141,11 +132,11 @@ public class TrackMatcher {
                         new TrackMatch(trackNum, trackMetadata.artist(), trackMetadata.title()));
 
             } catch (Exception ex) {
-                return Map.of();
+                log.debug("Failed to read tags from '{}': {}", file.getFileName(), ex.getMessage());
+                continue;
             }
         }
-
-        return matchMap.size() == audioFiles.size() ? matchMap : Map.of();
+        return matchMap;
     }
 
     private Integer extractTrackNumber(String filename, ReleaseMetadata metadata) {

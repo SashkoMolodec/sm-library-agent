@@ -62,27 +62,27 @@ public class ReprocessingService {
                 byte[] coverArt = coverArtService.getCoverArt(metadata, directoryPath);
 
                 // Match files using tags (if valid) or filename-based matching
-                Map<String, TrackMatch> matchMap = trackMatcher.tagMatch(audioFiles, metadata);
+                Map<String, TrackMatch> matchMap = trackMatcher.match(audioFiles, metadata);
 
                 // Re-tag all audio files
-                for (Path file : audioFiles) {
+                for (Path filePath : audioFiles) {
                     try {
-                        TrackMatch match = matchMap.get(file.getFileName().toString());
+                        TrackMatch match = matchMap.get(filePath.toString());
                         if (match == null) {
-                            log.error("No match found for {} - this should not happen!", file.getFileName());
+                            log.error("No match found for {} - this should not happen!", filePath.getFileName());
                             errorCount++;
                             continue;
                         }
 
                         log.info("Tagging file {} with: trackNumber={}, title='{}', artist='{}'",
-                                file.getFileName(), match.trackNumber(), match.trackTitle(), match.artist());
+                                filePath.getFileName(), match.trackNumber(), match.trackTitle(), match.artist());
 
-                        audioTagger.tagFile(file, metadata, match, coverArt);
+                        audioTagger.tagFile(filePath, metadata, match, coverArt);
                         successCount++;
-                        log.debug("Successfully retagged: {}", file.getFileName());
+                        log.debug("Successfully retagged: {}", filePath.getFileName());
 
                     } catch (Exception ex) {
-                        log.error("Failed to retag {}: {}", file.getFileName(), ex.getMessage());
+                        log.error("Failed to retag {}: {}", filePath.getFileName(), ex.getMessage());
                         errorCount++;
                     }
                 }
