@@ -1,4 +1,4 @@
-package com.sashkomusic.libraryagent.domain.service;
+package com.sashkomusic.libraryagent.domain.service.sync;
 
 import io.methvin.watcher.DirectoryChangeEvent;
 import io.methvin.watcher.DirectoryWatcher;

@@ -1,10 +1,11 @@
-package com.sashkomusic.libraryagent.domain.service;
+package com.sashkomusic.libraryagent.domain.service.sync;
 
 import com.sashkomusic.libraryagent.domain.entity.*;
 import com.sashkomusic.libraryagent.domain.model.TagChange;
 import com.sashkomusic.libraryagent.domain.model.TrackTagChanges;
 import com.sashkomusic.libraryagent.domain.repository.LabelRepository;
 import com.sashkomusic.libraryagent.domain.repository.TrackRepository;
+import com.sashkomusic.libraryagent.domain.service.utils.AudioTagExtractor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;

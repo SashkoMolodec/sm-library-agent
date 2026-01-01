@@ -1,4 +1,4 @@
-package com.sashkomusic.libraryagent.domain.service;
+package com.sashkomusic.libraryagent.domain.service.sync;
 
 import com.sashkomusic.libraryagent.domain.model.TrackTagChanges;
 import com.sashkomusic.libraryagent.messaging.producer.dto.TagChangesNotificationDto;

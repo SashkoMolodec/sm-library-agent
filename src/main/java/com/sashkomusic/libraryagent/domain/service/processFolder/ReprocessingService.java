@@ -1,9 +1,9 @@
-package com.sashkomusic.libraryagent.domain.service;
+package com.sashkomusic.libraryagent.domain.service.processFolder;
 
 import com.sashkomusic.libraryagent.domain.model.ReleaseMetadata;
 import com.sashkomusic.libraryagent.domain.model.ReprocessOptions;
 import com.sashkomusic.libraryagent.domain.model.TrackMatch;
-import com.sashkomusic.libraryagent.domain.repository.ReleaseRepository;
+import com.sashkomusic.libraryagent.domain.service.ReleaseService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,7 +26,6 @@ public class ReprocessingService {
     private final TrackMatcher trackMatcher;
     private final CoverArtService coverArtService;
     private final ReleaseMetadataWriter metadataWriter;
-    private final ReleaseRepository releaseRepository;
     private final ReleaseService releaseService;
 
     @Transactional

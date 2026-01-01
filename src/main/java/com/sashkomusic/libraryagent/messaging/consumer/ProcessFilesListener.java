@@ -1,6 +1,6 @@
 package com.sashkomusic.libraryagent.messaging.consumer;
 
-import com.sashkomusic.libraryagent.domain.service.LibraryProcessingService;
+import com.sashkomusic.libraryagent.domain.service.processFolder.LibraryProcessingService;
 import com.sashkomusic.libraryagent.messaging.consumer.dto.ProcessLibraryTaskDto;
 import com.sashkomusic.libraryagent.messaging.producer.LibraryProcessingResultProducer;
 import com.sashkomusic.libraryagent.messaging.producer.dto.LibraryProcessingCompleteDto;

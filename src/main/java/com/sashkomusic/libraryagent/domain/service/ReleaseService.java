@@ -12,6 +12,8 @@ import com.sashkomusic.libraryagent.domain.repository.ArtistRepository;
 import com.sashkomusic.libraryagent.domain.repository.LabelRepository;
 import com.sashkomusic.libraryagent.domain.repository.ReleaseRepository;
 import com.sashkomusic.libraryagent.domain.repository.TagRepository;
+import com.sashkomusic.libraryagent.domain.service.utils.AudioTagExtractor;
+import com.sashkomusic.libraryagent.domain.service.processFolder.FileOrganizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -19,7 +21,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 
 @Slf4j
 @Service

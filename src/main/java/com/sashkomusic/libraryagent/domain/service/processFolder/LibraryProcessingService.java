@@ -1,7 +1,8 @@
-package com.sashkomusic.libraryagent.domain.service;
+package com.sashkomusic.libraryagent.domain.service.processFolder;
 
 import com.sashkomusic.libraryagent.config.LibraryConfig;
 import com.sashkomusic.libraryagent.domain.model.*;
+import com.sashkomusic.libraryagent.domain.service.ReleaseService;
 import com.sashkomusic.libraryagent.messaging.consumer.dto.ProcessLibraryTaskDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

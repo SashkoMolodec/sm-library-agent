@@ -1,14 +1,12 @@
 package com.sashkomusic.libraryagent.messaging.consumer;
 
-import com.sashkomusic.libraryagent.domain.service.ReprocessingService;
+import com.sashkomusic.libraryagent.domain.service.processFolder.ReprocessingService;
 import com.sashkomusic.libraryagent.messaging.consumer.dto.ReprocessReleaseTaskDto;
 import com.sashkomusic.libraryagent.messaging.producer.ReprocessReleaseResultProducer;
 import com.sashkomusic.libraryagent.messaging.producer.dto.ReprocessReleaseResultDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.support.KafkaHeaders;
-import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
 
 @Component

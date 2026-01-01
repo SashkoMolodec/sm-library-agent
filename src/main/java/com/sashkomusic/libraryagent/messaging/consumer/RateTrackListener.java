@@ -1,6 +1,6 @@
 package com.sashkomusic.libraryagent.messaging.consumer;
 
-import com.sashkomusic.libraryagent.domain.service.RateTrackService;
+import com.sashkomusic.libraryagent.domain.service.tag.RateTrackService;
 import com.sashkomusic.libraryagent.messaging.consumer.dto.RateTrackTaskDto;
 import com.sashkomusic.libraryagent.messaging.producer.TrackUpdateResultProducer;
 import com.sashkomusic.libraryagent.messaging.producer.dto.TrackUpdateResultDto;

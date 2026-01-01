@@ -1,4 +1,4 @@
-package com.sashkomusic.libraryagent.domain.service;
+package com.sashkomusic.libraryagent.domain.service.processFolder;
 
 import com.sashkomusic.libraryagent.domain.model.ValidationResult;
 import com.sashkomusic.libraryagent.messaging.consumer.dto.ProcessLibraryTaskDto;
