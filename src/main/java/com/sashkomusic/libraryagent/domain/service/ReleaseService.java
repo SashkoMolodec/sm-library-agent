@@ -14,6 +14,8 @@ import com.sashkomusic.libraryagent.domain.repository.ReleaseRepository;
 import com.sashkomusic.libraryagent.domain.repository.TagRepository;
 import com.sashkomusic.libraryagent.domain.service.utils.AudioTagExtractor;
 import com.sashkomusic.libraryagent.domain.service.processFolder.FileOrganizer;
+import com.sashkomusic.libraryagent.messaging.producer.AnalyzeTrackProducer;
+import com.sashkomusic.libraryagent.messaging.producer.dto.AnalyzeTrackTaskDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -32,9 +34,10 @@ public class ReleaseService {
     private final TagRepository tagRepository;
     private final LabelRepository labelRepository;
     private final AudioTagExtractor tagExtractor;
+    private final AnalyzeTrackProducer analyzeTrackProducer;
 
     @Transactional
-    public Release saveRelease(
+    public void saveRelease(
             ReleaseMetadata metadata,
             String directoryPath,
             String coverPath,
@@ -59,7 +62,7 @@ public class ReleaseService {
         }
 
         if (metadata.types() != null && !metadata.types().isEmpty()) {
-            ReleaseType releaseType = mapToReleaseType(metadata.types().get(0));
+            ReleaseType releaseType = mapToReleaseType(metadata.types().getFirst());
             release.setReleaseType(releaseType);
         }
 
@@ -69,9 +72,9 @@ public class ReleaseService {
 
         if (metadata.years() != null && !metadata.years().isEmpty()) {
             try {
-                release.setInitialRelease(Integer.parseInt(metadata.years().get(0)));
+                release.setInitialRelease(Integer.parseInt(metadata.years().getFirst()));
             } catch (NumberFormatException e) {
-                log.warn("Could not parse year: {}", metadata.years().get(0));
+                log.warn("Could not parse year: {}", metadata.years().getFirst());
             }
         }
 
@@ -111,7 +114,7 @@ public class ReleaseService {
         Release savedRelease = releaseRepository.save(release);
         log.info("Successfully saved release with ID: {}", savedRelease.getId());
 
-        return savedRelease;
+        triggerAudioAnalysis(savedRelease);
     }
 
     private void extractAndStoreTags(Track track, String filePath) {
@@ -184,5 +187,28 @@ public class ReleaseService {
         }
 
         return ReleaseType.ALBUM;
+    }
+
+    private void triggerAudioAnalysis(Release release) {
+        log.info("Triggering audio analysis for {} tracks in release: {}",
+                release.getTracks().size(), release.getTitle());
+
+        for (Track track : release.getTracks()) {
+            try {
+                AnalyzeTrackTaskDto task = new AnalyzeTrackTaskDto(
+                        track.getId(),
+                        track.getLocalPath(),
+                        release.getId(),
+                        release.getTitle(),
+                        track.getTitle()
+                );
+
+                analyzeTrackProducer.sendAnalysisTask(task);
+
+            } catch (Exception ex) {
+                log.error("Failed to send analysis task for track {}: {}",
+                        track.getTitle(), ex.getMessage());
+            }
+        }
     }
 }
