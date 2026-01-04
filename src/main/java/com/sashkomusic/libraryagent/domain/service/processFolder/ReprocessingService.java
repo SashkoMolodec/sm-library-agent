@@ -186,6 +186,7 @@ public class ReprocessingService {
             Path coverFile = Paths.get(directoryPath).resolve("cover.jpg");
             String coverPath = Files.exists(coverFile) ? coverFile.toString() : null;
 
+            releaseService.clearReleaseData(metadata.id());
             releaseService.saveRelease(metadata, directoryPath, coverPath, organizedFiles, newVersion);
 
             log.info("Successfully recreated release in database: {} tracks, sourceId={}",

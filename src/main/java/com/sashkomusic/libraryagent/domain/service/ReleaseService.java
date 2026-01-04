@@ -37,6 +37,19 @@ public class ReleaseService {
     private final AnalyzeTrackProducer analyzeTrackProducer;
 
     @Transactional
+    public void clearReleaseData(String sourceId) {
+        log.info("Clearing existing data for release with sourceId: {}", sourceId);
+        releaseRepository.findBySourceId(sourceId)
+                .ifPresent(release -> {
+                    log.info("Clearing tracks, artists, and tags for release: {}", release.getTitle());
+                    release.getTracks().clear();
+                    release.getArtists().clear();
+                    release.getTags().clear();
+                    releaseRepository.save(release);
+                });
+    }
+
+    @Transactional
     public void saveRelease(
             ReleaseMetadata metadata,
             String directoryPath,
