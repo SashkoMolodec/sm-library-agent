@@ -2,6 +2,7 @@ package com.sashkomusic.libraryagent.domain.service.processFolder;
 
 import com.sashkomusic.libraryagent.domain.model.ReleaseMetadata;
 import com.sashkomusic.libraryagent.domain.model.TrackMatch;
+import com.sashkomusic.libraryagent.domain.model.TrackMetadata;
 import lombok.extern.slf4j.Slf4j;
 import org.jaudiotagger.audio.AudioFile;
 import org.jaudiotagger.audio.AudioFileIO;
@@ -126,10 +127,14 @@ public class TrackMatcher {
                     continue;
                 }
 
-                usedTrackNumbers.add(trackNum);
                 var trackMetadata = metadata.tracks().get(trackNum - 1);
-                matchMap.put(file.toString(),
-                        new TrackMatch(trackNum, trackMetadata.artist(), trackMetadata.title()));
+                TrackMatch match = createTrackMatchFromTags(tag, trackMetadata, trackNum);
+
+                usedTrackNumbers.add(trackNum);
+                matchMap.put(file.toString(), match);
+
+                log.debug("File '{}' matched by tags: track={}, title='{}', artist='{}'",
+                        file.getFileName(), trackNum, match.trackTitle(), match.artist());
 
             } catch (Exception ex) {
                 log.debug("Failed to read tags from '{}': {}", file.getFileName(), ex.getMessage());
@@ -206,5 +211,27 @@ public class TrackMatcher {
         } catch (NumberFormatException ex) {
             return -1;
         }
+    }
+
+    private TrackMatch createTrackMatchFromTags(Tag tag, TrackMetadata trackMetadata, int trackNum) {
+        String title = readTitleFromTag(tag, trackMetadata);
+        String artist = readArtistFromTag(tag, trackMetadata);
+        return new TrackMatch(trackNum, artist, title);
+    }
+
+    private String readTitleFromTag(Tag tag, TrackMetadata trackMetadata) {
+        String titleFromTag = tag.getFirst(FieldKey.TITLE);
+        if (titleFromTag != null && !titleFromTag.isEmpty()) {
+            return titleFromTag;
+        }
+        return trackMetadata.title();
+    }
+
+    private String readArtistFromTag(Tag tag, TrackMetadata trackMetadata) {
+        String artistFromTag = tag.getFirst(FieldKey.ARTIST);
+        if (artistFromTag != null && !artistFromTag.isEmpty()) {
+            return artistFromTag;
+        }
+        return trackMetadata.artist();
     }
 }
