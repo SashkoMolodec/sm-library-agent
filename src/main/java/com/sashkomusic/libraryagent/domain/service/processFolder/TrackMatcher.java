@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import java.nio.file.Path;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import lombok.RequiredArgsConstructor;
 
@@ -41,21 +42,47 @@ public class TrackMatcher {
             log.info("Matched {} files by tags, {} files need filename matching",
                     matches.size(), unmatchedFiles.size());
 
-            // Get next available track number
-            int nextTrackNum = matches.values().stream()
-                    .mapToInt(TrackMatch::trackNumber)
-                    .max()
-                    .orElse(0) + 1;
-
-            // Match remaining files by filename
-            for (Path file : unmatchedFiles) {
-                TrackMatch match = matchSingleFile(file, metadata, nextTrackNum);
-                matches.put(file.toString(), match);
-                nextTrackNum = Math.max(nextTrackNum, match.trackNumber()) + 1;
+            if (hasDuplicateTrackNumbers(unmatchedFiles, matches, metadata)) {
+                log.info("Duplicates detected in filename track numbers, using sequential matching");
+                return matchSequentially(sortedFiles, metadata);
             }
+
+            matchByFilename(unmatchedFiles, matches, metadata);
         }
 
         return matches;
+    }
+
+    private boolean hasDuplicateTrackNumbers(List<Path> files, Map<String, TrackMatch> existingMatches,
+                                               ReleaseMetadata metadata) {
+        Set<Integer> usedTrackNumbers = existingMatches.values().stream()
+                .map(TrackMatch::trackNumber)
+                .collect(Collectors.toSet());
+
+        for (Path file : files) {
+            Integer trackNum = extractTrackNumber(file.getFileName().toString(), metadata);
+            if (trackNum != null && trackNum > 0) {
+                if (usedTrackNumbers.contains(trackNum)) {
+                    return true;
+                }
+                usedTrackNumbers.add(trackNum);
+            }
+        }
+        return false;
+    }
+
+    private void matchByFilename(List<Path> unmatchedFiles, Map<String, TrackMatch> matches,
+                                  ReleaseMetadata metadata) {
+        int nextTrackNum = matches.values().stream()
+                .mapToInt(TrackMatch::trackNumber)
+                .max()
+                .orElse(0) + 1;
+
+        for (Path file : unmatchedFiles) {
+            TrackMatch match = matchSingleFile(file, metadata, nextTrackNum);
+            matches.put(file.toString(), match);
+            nextTrackNum = Math.max(nextTrackNum, match.trackNumber()) + 1;
+        }
     }
 
     private TrackMatch matchSingleFile(Path file, ReleaseMetadata metadata, int fallbackTrackNum) {
@@ -85,11 +112,25 @@ public class TrackMatcher {
 
     private Map<String, TrackMatch> matchSequentially(List<Path> sortedFiles, ReleaseMetadata metadata) {
         Map<String, TrackMatch> matches = new HashMap<>();
+        List<TrackMetadata> tracks = metadata.tracks();
+        boolean hasMetadata = tracks != null && !tracks.isEmpty();
+
         for (int i = 0; i < sortedFiles.size(); i++) {
             Path file = sortedFiles.get(i);
-            var trackMetadata = metadata.tracks().get(i);
-            matches.put(file.toString(),
-                    new TrackMatch(i + 1, trackMetadata.artist(), trackMetadata.title()));
+            int trackNumber = i + 1;
+
+            String artist;
+            String title;
+            if (hasMetadata && i < tracks.size()) {
+                var trackMetadata = tracks.get(i);
+                artist = trackMetadata.artist();
+                title = trackMetadata.title();
+            } else {
+                artist = metadata.artist();
+                title = extractTitle(file.getFileName().toString());
+            }
+
+            matches.put(file.toString(), new TrackMatch(trackNumber, artist, title));
         }
         return matches;
     }
