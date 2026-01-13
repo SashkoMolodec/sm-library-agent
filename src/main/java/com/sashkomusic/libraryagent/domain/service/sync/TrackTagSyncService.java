@@ -3,6 +3,7 @@ package com.sashkomusic.libraryagent.domain.service.sync;
 import com.sashkomusic.libraryagent.domain.entity.*;
 import com.sashkomusic.libraryagent.domain.model.TagChange;
 import com.sashkomusic.libraryagent.domain.model.TrackTagChanges;
+import com.sashkomusic.libraryagent.domain.repository.ArtistRepository;
 import com.sashkomusic.libraryagent.domain.repository.LabelRepository;
 import com.sashkomusic.libraryagent.domain.repository.TrackRepository;
 import com.sashkomusic.libraryagent.domain.service.utils.AudioTagExtractor;
@@ -12,9 +13,11 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -30,6 +33,7 @@ public class TrackTagSyncService {
     private final AudioTagExtractor tagExtractor;
     private final TagChangeBatchCollector batchCollector;
     private final LabelRepository labelRepository;
+    private final ArtistRepository artistRepository;
 
     @Value("${sync.enabled:true}")
     private boolean syncEnabled;
@@ -41,12 +45,14 @@ public class TrackTagSyncService {
             TrackRepository trackRepository,
             AudioTagExtractor tagExtractor,
             TagChangeBatchCollector batchCollector,
-            LabelRepository labelRepository
+            LabelRepository labelRepository,
+            ArtistRepository artistRepository
     ) {
         this.trackRepository = trackRepository;
         this.tagExtractor = tagExtractor;
         this.batchCollector = batchCollector;
         this.labelRepository = labelRepository;
+        this.artistRepository = artistRepository;
     }
 
     @Scheduled(fixedDelayString = "${sync.interval:300000}")
@@ -126,7 +132,7 @@ public class TrackTagSyncService {
             }
 
             // Merge tags (smart update - only changed tags) and collect changes
-            TrackTagChanges trackChanges = mergeTagsAndCollectChanges(track, fileTags);
+            TrackTagChanges trackChanges = mergeTagsAndCollectChanges(track, fileTags, audioFile);
 
             if (trackChanges.hasChanges()) {
                 trackRepository.save(track);
@@ -146,7 +152,7 @@ public class TrackTagSyncService {
         }
     }
 
-    private TrackTagChanges mergeTagsAndCollectChanges(Track track, Map<String, String> fileTags) {
+    private TrackTagChanges mergeTagsAndCollectChanges(Track track, Map<String, String> fileTags, Path audioFile) {
         String artistName = track.getArtists().stream()
                 .findFirst()
                 .map(Artist::getName)
@@ -157,6 +163,12 @@ public class TrackTagSyncService {
                 track.getTitle(),
                 artistName
         );
+
+        // Track changes that affect filename
+        boolean artistChanged = false;
+        boolean titleChanged = false;
+        boolean trackNumberChanged = false;
+        String newArtistName = null;
 
         for (Map.Entry<String, String> entry : fileTags.entrySet()) {
             String tagName = entry.getKey();
@@ -176,6 +188,16 @@ public class TrackTagSyncService {
                 if (isTitleTag(tagName) && newValue != null && !newValue.isEmpty()) {
                     log.info("Updating track title from '{}' to '{}'", track.getTitle(), newValue);
                     track.setTitle(newValue);
+                    titleChanged = true;
+                }
+
+                if (isArtistTag(tagName) && newValue != null && !newValue.isEmpty()) {
+                    newArtistName = newValue;
+                    artistChanged = updateTrackArtist(track, newValue);
+                }
+
+                if (isTrackNumberTag(tagName) && newValue != null && !newValue.isEmpty()) {
+                    trackNumberChanged = updateTrackNumber(track, newValue);
                 }
 
                 if (isPublisherTag(tagName) && newValue != null && !newValue.isEmpty()) {
@@ -185,6 +207,15 @@ public class TrackTagSyncService {
                 log.trace("Updated tag {} for track {}: '{}' -> '{}'",
                         tagName, track.getTitle(), currentValue, newValue);
             }
+        }
+
+        // Rename file if artist, title or track number changed
+        if (artistChanged || titleChanged || trackNumberChanged) {
+            String currentArtist = track.getArtists().stream()
+                    .findFirst()
+                    .map(Artist::getName)
+                    .orElse("unknown");
+            renameFileIfNeeded(track, audioFile, currentArtist);
         }
 
         return trackChanges;
@@ -216,6 +247,121 @@ public class TrackTagSyncService {
     private boolean isPublisherTag(String tagName) {
         String upperTag = tagName.toUpperCase();
         return "PUBLISHER".equals(upperTag) || "TPUB".equals(upperTag);
+    }
+
+    private boolean isArtistTag(String tagName) {
+        String upperTag = tagName.toUpperCase();
+        return "TPE1".equals(upperTag) || "ARTIST".equals(upperTag);
+    }
+
+    private boolean isTrackNumberTag(String tagName) {
+        String upperTag = tagName.toUpperCase();
+        return "TRCK".equals(upperTag) || "TRACK".equals(upperTag);
+    }
+
+    private boolean updateTrackArtist(Track track, String newArtistName) {
+        String currentArtistName = track.getArtists().stream()
+                .findFirst()
+                .map(Artist::getName)
+                .orElse(null);
+
+        if (currentArtistName != null && currentArtistName.equalsIgnoreCase(newArtistName)) {
+            return false;
+        }
+
+        // Find or create artist
+        Artist newArtist = artistRepository.findByName(newArtistName).orElse(null);
+        if (newArtist == null) {
+            log.info("Creating new artist: '{}'", newArtistName);
+            newArtist = new Artist(newArtistName);
+            newArtist = artistRepository.save(newArtist);
+        }
+
+        // Remove old artists and add new one
+        track.getArtists().clear();
+        track.addArtist(newArtist);
+
+        log.info("Updated artist for track '{}': '{}' -> '{}'",
+                track.getTitle(), currentArtistName, newArtistName);
+        return true;
+    }
+
+    private boolean updateTrackNumber(Track track, String newTrackNumberStr) {
+        try {
+            // Handle formats like "5" or "5/12"
+            String numberPart = newTrackNumberStr.contains("/")
+                    ? newTrackNumberStr.split("/")[0]
+                    : newTrackNumberStr;
+
+            int newTrackNumber = Integer.parseInt(numberPart.trim());
+            Integer currentTrackNumber = track.getTrackNumber();
+
+            if (currentTrackNumber != null && currentTrackNumber == newTrackNumber) {
+                return false;
+            }
+
+            log.info("Updating track number for '{}': {} -> {}",
+                    track.getTitle(), currentTrackNumber, newTrackNumber);
+            track.setTrackNumber(newTrackNumber);
+            return true;
+        } catch (NumberFormatException e) {
+            log.warn("Invalid track number format: '{}'", newTrackNumberStr);
+            return false;
+        }
+    }
+
+    private void renameFileIfNeeded(Track track, Path currentPath, String artistName) {
+        try {
+            String extension = getExtension(currentPath);
+            Integer trackNumber = track.getTrackNumber();
+            String title = track.getTitle();
+
+            if (trackNumber == null || title == null || title.isEmpty()) {
+                log.warn("Cannot rename file - missing track number or title");
+                return;
+            }
+
+            String newFilename = String.format("%02d. %s - %s.%s",
+                    trackNumber,
+                    sanitizeFilename(artistName),
+                    sanitizeFilename(title),
+                    extension);
+
+            Path newPath = currentPath.getParent().resolve(newFilename);
+
+            if (currentPath.equals(newPath)) {
+                log.trace("File already has correct name: {}", newFilename);
+                return;
+            }
+
+            if (Files.exists(newPath)) {
+                log.warn("Cannot rename - file already exists: {}", newFilename);
+                return;
+            }
+
+            Files.move(currentPath, newPath, StandardCopyOption.ATOMIC_MOVE);
+            track.setLocalPath(newPath.toString());
+
+            log.info("Renamed file: {} -> {}", currentPath.getFileName(), newFilename);
+
+        } catch (IOException e) {
+            log.error("Failed to rename file {}: {}", currentPath.getFileName(), e.getMessage());
+        }
+    }
+
+    private String getExtension(Path path) {
+        String filename = path.getFileName().toString();
+        int lastDot = filename.lastIndexOf('.');
+        if (lastDot > 0 && lastDot < filename.length() - 1) {
+            return filename.substring(lastDot + 1).toLowerCase();
+        }
+        return "";
+    }
+
+    private String sanitizeFilename(String filename) {
+        return filename.replaceAll("[/\\\\:*?\"<>|]", "")
+                .trim()
+                .toLowerCase();
     }
 
     private void updateReleaseLabel(Track track, String labelName) {
